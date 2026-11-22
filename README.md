@@ -1,6 +1,6 @@
 # Battle Engine — Mod & Fight Creation Guide
 
-A single-file, canvas-based, turn-based battle engine in the style of Deltarune. A fight is built from **one text file** (`encounter.ini`) plus **image/GIF assets**. You don't need to touch `script.js` to make a fight.
+A canvas-based, turn-based battle engine in the style of Deltarune. A fight is built from **one text file** (`encounter.ini`) plus **image/GIF assets**. You don't need to touch `GAME/script.js` to make a fight.
 
 The player controls **Kris, Susie and Ralsei**. Enemies attack by playing a **GIF (or image) inside the battle box**. Any pixel of the right color in the current frame hurts the player's soul, so you can draw bullet patterns in any animation program. **The battle box automatically resizes to match each attack's GIF**, so the size you draw is the size you fight in.
 
@@ -35,9 +35,31 @@ The player controls **Kris, Susie and Ralsei**. Enemies attack by playing a **GI
 
 ## 1. Quick start
 
+### Repository layout
+
+```
+root/
+├─ index.html
+├─ README.md
+├─ GAME/                    <- the engine (you don't edit this to make a fight)
+│  ├─ script.js
+│  └─ ASSETS/               <- base game assets
+│     ├─ kris-sheet.jpg
+│     ├─ rals-sheet.png
+│     ├─ susie-sheet.png
+│     └─ fonts/             <- optional font files (e.g. Determination.ttf)
+└─ MOD/                     <- the fight (the only folder you change)
+   ├─ encounter.ini
+   ├─ ENEMY/                <- enemy sprites
+   └─ ATTACKS/              <- attack GIFs and _stripN.png files
+```
+
+- **`GAME/`** is the engine and its base assets. It contains the party sprite sheets and fonts, which mods cannot replace.
+- **`MOD/`** is your fight. To make a new fight you only ever edit or replace this folder.
+
 ### Host page
 
-You need an HTML page with a canvas whose id is `gameCanvas`, loading `script.js` at the end of the body:
+`index.html` sits in the root and needs a canvas with the id `gameCanvas`, loading `GAME/script.js` at the end of the body:
 
 ```html
 <!DOCTYPE html>
@@ -46,70 +68,102 @@ You need an HTML page with a canvas whose id is `gameCanvas`, loading `script.js
   <meta charset="utf-8">
   <title>Battle</title>
   <style>
+    /* Optional font: put the file in GAME/ASSETS/fonts/ and uncomment.
+    @font-face {
+      font-family: "Determination";
+      src: url("GAME/ASSETS/fonts/Determination.ttf") format("truetype");
+    }
+    */
     html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
     canvas { display: block; }
   </style>
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
-  <script src="script.js"></script>
+  <script src="GAME/script.js"></script>
 </body>
 </html>
 ```
 
-The party sprite sheets (`kris-sheet.jpg`, `rals-sheet.png`, `susie-sheet.png`) must sit next to the page. Party sprites are **not** loaded from mod folders. If a sheet is missing, that member is drawn as a colored rectangle and the game still works.
+All engine paths are relative to `index.html`, so keep it in the root.
 
-The engine looks for the font `Determination` and falls back to `monospace`. If you want the real look, add an `@font-face` for it.
+The party sprite sheets (`kris-sheet.jpg`, `rals-sheet.png`, `susie-sheet.png`) go in `GAME/ASSETS/`. Party sprites are **not** loaded from the mod folder. If a sheet is missing, that member is drawn as a colored rectangle and the game still works.
+
+The engine uses the font `Determination` and falls back to `monospace`. For the real look, add the font file under `GAME/ASSETS/fonts/` and enable the `@font-face` block above.
 
 ### Three ways to load a fight
 
 | Method | How |
 |---|---|
-| **LOAD MOD button** | Click the small `LOAD MOD` button (top-right) and pick your mod **folder**. |
-| **Drag and drop** | Drag the mod folder onto the game window. |
-| **Auto-load** | Put `encounter.ini` (or `encounter.txt`) next to `index.html` and serve the site. It is loaded at startup. |
+| **Auto-load** | Put `encounter.ini` (or `encounter.txt`) in the `MOD` folder and serve the site. It is loaded at startup. This is how you publish a fight. |
+| **LOAD MOD button** | Click the small `LOAD MOD` button (top-right) and pick a mod folder (the folder that **contains** `encounter.ini`, such as `MOD`). |
+| **Drag and drop** | Drag a mod folder onto the game window. |
 
 The top-right corner has two small buttons: **README** (opens this guide on GitHub in a new tab) and **LOAD MOD**. **If a mod is auto-loaded, both buttons are hidden**, so a published fight shows only the game. Drag-and-drop still works either way, which is handy for testing a different mod over a published one.
 
-**Browsers block `fetch` and pixel reads on `file://` pages.** Opening `index.html` by double-clicking works for the built-in demo fight, but attack-GIF collision will fail (the canvas becomes tainted). Either use LOAD MOD or drag-and-drop (these always work), or run a local server from the project folder:
+**Browsers block `fetch` and pixel reads on `file://` pages.** Opening `index.html` by double-clicking won't auto-load `MOD/`, and attack-GIF collision will fail (the canvas becomes tainted). Either use LOAD MOD or drag-and-drop (these always work), or run a local server from the project root:
 
 ```bash
 python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-If you don't load anything, the engine runs a built-in demo with two enemies (Rudinn and Hathy) and simple aimed bullets.
+If there is no `MOD/encounter.ini` and you load nothing, the engine runs a built-in demo with two enemies (Rudinn and Hathy) and simple aimed bullets.
+
+The shipped `MOD/encounter.ini` is a minimal starter fight (one Test Dummy, no extra assets). Replace it with your own.
 
 ---
 
 ## 2. Project and mod layout
 
-A mod is just a folder:
+A mod is the `MOD` folder, laid out like this:
 
 ```
-my-fight/
+MOD/
 ├─ encounter.ini          <- required (or encounter.txt)
-├─ enemy/
+├─ ENEMY/
 │  └─ warden_sheet.png    <- enemy sprite (sheet or GIF)
-└─ attacks/
+└─ ATTACKS/
    ├─ rain.gif            <- attack animations
    ├─ sweep.gif
-   └─ storm.gif
+   ├─ storm.gif
+   └─ spiral_strip8.png   <- strip PNG attack
 ```
+
+Enemy sprites go in `ENEMY/` and everything that plays inside the battle box (GIFs, `_stripN.png`, still images) goes in `ATTACKS/`.
 
 ### How the engine finds your config
 
-- It uses `encounter.ini` or `encounter.txt` if present. Otherwise it uses the first `.ini` / `.txt` file it finds.
-- If the folder has no such file, you get an alert: *"No encounter.ini or encounter.txt found…"*
+- **Auto-load:** the engine fetches `MOD/encounter.ini`, then `MOD/encounter.txt`.
+- **LOAD MOD / drag-and-drop:** it uses `encounter.ini` or `encounter.txt` if present. Otherwise it uses the first `.ini` / `.txt` file it finds.
+- If a folder you load has no such file, you get an alert: *"No encounter.ini or encounter.txt found…"*
 
 ### How asset paths are resolved
 
-Paths in the INI are relative to the mod folder root (the top-level folder you dropped is stripped).
+Paths in the INI are relative to the **`MOD` folder**:
 
-- Matching is **case-insensitive** and slash-insensitive for files loaded through LOAD MOD or drag-and-drop.
-- If the full path isn't found, the engine tries the **file name alone**. `attacks/rain.gif`, `rain.gif` and `RAIN.GIF` all work if there's only one `rain.gif` in the mod.
+```ini
+sprite = ENEMY/warden_sheet.png
+file   = ATTACKS/storm.gif
+```
+
+You can also **leave out the folder name**. A bare file name is looked up in `ENEMY/` for enemy sprites and in `ATTACKS/` for attacks:
+
+```ini
+# same as ENEMY/warden_sheet.png
+sprite = warden_sheet.png
+
+# same as ATTACKS/rain.gif
+1 = rain.gif
+```
+
+Sub-folders work too (`ATTACKS/phase2/storm.gif`).
+
+Other rules:
+
+- **Folder pick / drag-and-drop:** matching is **case-insensitive** and slash-insensitive. If the full path isn't found, the engine tries the **file name alone**, so `ATTACKS/rain.gif`, `rain.gif` and `RAIN.GIF` all work if there's only one `rain.gif` in the mod.
 - Give files **unique names**, because the first file with a given name wins the fallback.
-- When auto-loading over HTTP, paths are fetched as written (relative to the page), so the server's case rules apply.
+- **Auto-load over HTTP is case-sensitive on most hosts, including GitHub Pages.** Use the exact folder names `ENEMY` and `ATTACKS` (upper case) and match your file names exactly.
 
 ---
 
@@ -233,7 +287,7 @@ Both names are identical. **Repeat the section** to add several enemies. Each de
 | `def` | `0` | Subtracted from damage dealt to it |
 | `x`, `y` | `470`, `80` | **Top-left** of the sprite in the 640×480 screen |
 | `scale` | `2` | Sprite scale multiplier |
-| `sprite` | none | Path to a `.gif`, a sprite sheet, or a single image |
+| `sprite` | none | Path to a `.gif`, a sprite sheet, or a single image, relative to `MOD/` (a bare file name is looked up in `ENEMY/`) |
 | `frameW`, `frameH` | whole image | Frame size for sprite sheets (see [Enemy sprites](#7-making-enemy-sprites)) |
 | `fps` | `8` | Speed of the default idle loop for sheets |
 | `acts` | `Check, Flatter` | Comma-separated list shown in Kris's ACT menu |
@@ -373,7 +427,7 @@ Optional settings for one attack. Both headers are identical. `name` is exactly 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `file` | the name itself | Actual file path. Lets you use short aliases |
+| `file` | the name itself | Actual file path, relative to `MOD/` (a bare file name is looked up in `ATTACKS/`). Lets you use short aliases |
 | `damage` | `18` | Damage per hit to the targeted party member |
 | `duration` | `480` | Length in **frames at 60 fps** (480 = 8 seconds) |
 | `fps` | the GIF's own timing | Force a playback speed |
@@ -385,14 +439,14 @@ An attack **without** an `[ATTACK:]` section still works with the defaults.
 
 ```ini
 [ATTACK:storm]
-file = attacks/storm.gif
+file = ATTACKS/storm.gif
 damage = 20
 duration = 600
 boss_anim = angry
 dialogue = HOLD STILL!
 ```
 
-With that, `3 = storm` in an attack list plays `attacks/storm.gif`.
+With that, `3 = storm` in an attack list plays `ATTACKS/storm.gif`.
 
 ---
 
@@ -458,7 +512,7 @@ GIF frame delays shorter than 20 ms are raised to 20 ms, and a delay of 0 is tre
 
 Three options:
 
-**A. GIF.** `sprite = enemy/boss.gif`. All frames are used, with the GIF's own timing for the default idle loop.
+**A. GIF.** `sprite = ENEMY/boss.gif`. All frames are used, with the GIF's own timing for the default idle loop.
 
 **B. Sprite sheet.** Set `frameW` and `frameH`. The image is cut into a grid and numbered left-to-right, top-to-bottom, starting at 0.
 
@@ -561,7 +615,7 @@ Damage is rounded down with a minimum of 1.
 
 ## 10. Full example encounter
 
-A two-phase boss with three ACTs, GIF attacks and dialogue. Save it as `encounter.ini` in your mod folder.
+A two-phase boss with three ACTs, GIF attacks and dialogue. Save it as `MOD/encounter.ini`, with the sprite in `MOD/ENEMY/` and the attacks in `MOD/ATTACKS/`.
 
 ```ini
 # ===== The Glitch Warden — example encounter =====
@@ -589,7 +643,7 @@ def = 2
 x = 440
 y = 40
 scale = 2
-sprite = enemy/warden_sheet.png
+sprite = ENEMY/warden_sheet.png
 frameW = 64
 frameH = 80
 acts = Check, Calm, Taunt
@@ -646,24 +700,24 @@ loop = 1
 
 # ---------- Attack settings ----------
 [ATTACK:rain]
-file = attacks/rain.gif
+file = ATTACKS/rain.gif
 damage = 14
 duration = 420
 
 [ATTACK:sweep]
-file = attacks/sweep.gif
+file = ATTACKS/sweep.gif
 damage = 16
 duration = 480
 
 [ATTACK:storm]
-file = attacks/storm.gif
+file = ATTACKS/storm.gif
 damage = 20
 duration = 600
 boss_anim = angry
 dialogue = HOLD STILL!
 
 [ATTACK:spiral]
-file = attacks/spiral_strip8.png
+file = ATTACKS/spiral_strip8.png
 damage = 18
 duration = 540
 fps = 12
@@ -683,7 +737,7 @@ What happens in this fight:
 
 - **Open the browser console** (F12). Missing or failed assets log `Could not load mod asset: <path>`.
 - **Inspect the parsed config.** Type `loadedModConfig` in the console to see exactly how your INI was read: enemies, phases, attacks and so on. If a value is missing, the key name is probably misspelled or in the wrong section.
-- **Reload a mod:** use LOAD MOD or drag the folder in again. Each load restarts the battle and clears the asset cache.
+- **Reload a mod:** refresh the page (for auto-load), or use LOAD MOD / drag the folder in again. Each load restarts the battle and clears the asset cache.
 - **Restart a fight:** win or lose and press `Z`.
 - **Test one thing at a time:**
   - Put the attack you're building at `1 = myattack` so it plays on the very first enemy turn.
@@ -697,8 +751,11 @@ What happens in this fight:
 
 | Symptom | Likely cause and fix |
 |---|---|
-| Alert "No encounter.ini… found" | The folder you selected has no `encounter.ini` / `encounter.txt`. Select the folder that **contains** the INI |
+| Alert "No encounter.ini… found" | The folder you selected has no `encounter.ini` / `encounter.txt`. Select the folder that **contains** the INI (usually `MOD`) |
 | Enemy is a green square | `sprite` path is wrong, or the file failed to load. Check the console |
+| Works with LOAD MOD but not when hosted | Auto-load is case-sensitive. Use the exact folder names `ENEMY` / `ATTACKS` and exact file-name case, and serve the site over HTTP |
+| Party members are colored rectangles | The sprite sheets aren't in `GAME/ASSETS/`, or the page isn't served over HTTP. Check the console |
+| Auto-load does nothing | `MOD/encounter.ini` is missing, misnamed, or the page was opened from `file://` |
 | Enemy is cut off or off-screen | `x` too large or `scale` too big. Keep `x + width×scale ≤ 640` |
 | Attack GIF shows but never hurts | Colors aren't exactly white / cyan / orange, or edges are anti-aliased. Check the [hit color table](#hit-colors) |
 | Attack hurts when it looks safe | The GIF is outside the 48–580 × 48–245 limits and was scaled, or you set a `boxW`/`boxH` override that stretches it. Resize the GIF into range and remove the override |
@@ -718,10 +775,10 @@ What happens in this fight:
 
 ## 13. Limits and what's hard-coded
 
-These live in `script.js`, not in the INI:
+These live in `GAME/script.js`, not in the INI:
 
-- **Party:** exactly Kris, Susie and Ralsei. Their sprites, sprite sheets and animations are built in and can't be replaced by a mod.
-- **Spells and TP costs** (Rude Buster, Pacify, Heal Prayer, S-/R-Action) and **items** (Dark Candy ×3, +40 HP; Revive Mint ×1, +90 HP) are fixed. To change them, edit the `SPELLS` table and the `items` array in `initBattle()`.
+- **Party:** exactly Kris, Susie and Ralsei. Their sprite sheets live in `GAME/ASSETS/`, and their animations are built into `GAME/script.js`, so a mod can't replace them.
+- **Spells and TP costs** (Rude Buster, Pacify, Heal Prayer, S-/R-Action) and **items** (Dark Candy ×3, +40 HP; Revive Mint ×1, +90 HP) are fixed. To change them, edit the `SPELLS` table and the `items` array in `initBattle()` in `GAME/script.js`.
 - **ACTs are global**, not per enemy.
 - **Multi-enemy fights:** every enemy shares the same attack sequence. Phase triggers read the first enemy still in the fight. Single-boss fights work best.
 - **Win condition:** killing and sparing are treated the same.
