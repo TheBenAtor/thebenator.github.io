@@ -69,6 +69,8 @@ The engine looks for the font `Determination` and falls back to `monospace`. If 
 | **Drag and drop** | Drag the mod folder onto the game window. |
 | **Auto-load** | Put `encounter.ini` (or `encounter.txt`) next to `index.html` and serve the site. It is loaded at startup. |
 
+The top-right corner has two small buttons: **README** (opens this guide on GitHub in a new tab) and **LOAD MOD**. **If a mod is auto-loaded, both buttons are hidden**, so a published fight shows only the game. Drag-and-drop still works either way, which is handy for testing a different mod over a published one.
+
 **Browsers block `fetch` and pixel reads on `file://` pages.** Opening `index.html` by double-clicking works for the built-in demo fight, but attack-GIF collision will fail (the canvas becomes tainted). Either use LOAD MOD or drag-and-drop (these always work), or run a local server from the project folder:
 
 ```bash
