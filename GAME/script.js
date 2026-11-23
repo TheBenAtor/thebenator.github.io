@@ -6,11 +6,12 @@ const V_HEIGHT = 480;
 const FONT_FAMILY = '"Determination", monospace';
 
 // Folder layout (all URLs are relative to index.html, which sits in the project root):
-//   GAME/ASSETS/  base game assets (party sprite sheets, fonts, ...)
-//   MOD/          encounter.ini + ENEMY/ (enemy sprites) + ATTACKS/ (attack gifs / strip pngs)
+//   GAME/ASSETS/  base game assets (party sprite sheets, fonts, background.gif, ...)
+//   MOD/          encounter.ini + ENEMY/ (enemy sprites) + ATTACKS/ (attack gifs / strip pngs) + BG/ (optional backgrounds)
 const ASSET_BASE = 'GAME/ASSETS/';
+const DEFAULT_BG_PATH = ASSET_BASE + 'background.gif';
 const MOD_BASE = 'MOD/';
-const MOD_SUBDIRS = { enemy: 'ENEMY/', attack: 'ATTACKS/' };
+const MOD_SUBDIRS = { enemy: 'ENEMY/', attack: 'ATTACKS/', bg: 'BG/' };
 
 const STATES = {
     ACTION_SELECT:  'ACTION_SELECT',
@@ -92,7 +93,7 @@ function isAbsoluteUrl(p) {
 
 // URLs to try when a mod asset is fetched over HTTP, most specific first.
 // "ENEMY/boss.png" -> MOD/ENEMY/boss.png. A bare "boss.png" also tries MOD/ENEMY/boss.png
-// (or MOD/ATTACKS/ for attacks) so mods can skip the folder name.
+// (or MOD/ATTACKS/ for attacks, MOD/BG/ for backgrounds) so mods can skip the folder name.
 function modUrlCandidates(path, kind) {
     if (isAbsoluteUrl(path)) return [path];
     const clean = path.replace(/\\/g, '/').replace(/^\.\//, '');
@@ -393,6 +394,84 @@ async function loadAnimatedAsset(path, stripCountHint = 0, kind = 'attack') {
 }
 
 // ============================================================================
+// BATTLE BACKGROUND LOADER (MOD GIF/PNG WITH FALLBACK TO GAME/ASSETS/background.gif)
+// ============================================================================
+let defaultBgAsset = null;
+let activeBg = null; // { asset, frameIdx, frameTimerMs, fps }
+
+async function loadDefaultBackground() {
+    if (defaultBgAsset) return defaultBgAsset;
+    try {
+        const res = await fetch(DEFAULT_BG_PATH);
+        if (res.ok) {
+            const buf = await res.arrayBuffer();
+            defaultBgAsset = decodeGifBuffer(buf);
+            return defaultBgAsset;
+        }
+    } catch (_) {
+        // Fallback for file:// where fetch() may be blocked by browser CORS
+    }
+    try {
+        const img = await loadImageUrl(DEFAULT_BG_PATH);
+        defaultBgAsset = {
+            frames: [{ canvas: img, delayMs: 80 }],
+            w: img.naturalWidth,
+            h: img.naturalHeight
+        };
+    } catch (err) {
+        console.warn('Could not load default background:', DEFAULT_BG_PATH, err.message);
+    }
+    return defaultBgAsset;
+}
+
+async function setBattleBackground(path = null, fps = null) {
+    const epoch = battleEpoch;
+    const fallback = await loadDefaultBackground();
+    if (epoch !== battleEpoch) return;
+
+    // Immediately show default background so there is no blank frame while a mod background loads
+    if (!activeBg && fallback) {
+        activeBg = { asset: fallback, frameIdx: 0, frameTimerMs: 0, fps: null };
+    }
+
+    if (path && typeof path === 'string') {
+        const modAsset = await loadAnimatedAsset(path, 0, 'bg');
+        if (epoch !== battleEpoch) return;
+        if (modAsset && modAsset.frames.length > 0) {
+            activeBg = { asset: modAsset, frameIdx: 0, frameTimerMs: 0, fps: fps || null };
+            return;
+        }
+    }
+
+    if (fallback) {
+        activeBg = { asset: fallback, frameIdx: 0, frameTimerMs: 0, fps: fps || null };
+    } else {
+        activeBg = null;
+    }
+}
+
+function updateBackground() {
+    if (!activeBg || !activeBg.asset || activeBg.asset.frames.length <= 1) return;
+    const frames = activeBg.asset.frames;
+    const curFrame = frames[activeBg.frameIdx % frames.length];
+    const frameDuration = activeBg.fps ? (1000 / activeBg.fps) : curFrame.delayMs;
+
+    activeBg.frameTimerMs += STEP_MS;
+    while (activeBg.frameTimerMs >= frameDuration) {
+        activeBg.frameTimerMs -= frameDuration;
+        activeBg.frameIdx = (activeBg.frameIdx + 1) % frames.length;
+    }
+}
+
+function drawBackground() {
+    if (!activeBg || !activeBg.asset || activeBg.asset.frames.length === 0) return;
+    const frames = activeBg.asset.frames;
+    const fc = frames[activeBg.frameIdx % frames.length].canvas;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(fc, 0, 0, V_WIDTH, V_HEIGHT);
+}
+
+// ============================================================================
 // INI / TXT ENCOUNTER PARSER
 // ============================================================================
 function parseScalar(val) {
@@ -411,13 +490,14 @@ function parseEncounterIni(rawText) {
         phases: [],
         attacks: { turns: {}, loop: 'last', maxTurn: 0 },
         attackMeta: {},
+        background: null,
         victoryText: null,
         gameOverText: null
     };
 
-    let sectionType = null;
+    let sectionType = 'BATTLE';
     let sectionName = null;
-    let currentObj = null;
+    let currentObj = cfg;
 
     for (const rawLine of rawText.split(/\r?\n/)) {
         const line = rawLine.trim();
@@ -430,7 +510,7 @@ function parseEncounterIni(rawText) {
             if (upper === 'ARENA') {
                 sectionType = 'ARENA';
                 currentObj = cfg.arena;
-            } else if (upper === 'BATTLE') {
+            } else if (upper === 'BATTLE' || upper === 'BACKGROUND' || upper === 'BG') {
                 sectionType = 'BATTLE';
                 currentObj = cfg;
             } else if (upper.startsWith('PARTY_')) {
@@ -1154,6 +1234,11 @@ function initBattle() {
     battleEpoch++;
     preparingEnemyTurn = false;
 
+    // 0. Load mod background (.gif or .png) or fall back to GAME/ASSETS/background.gif
+    const modBg = mod && (mod.background || mod.bg);
+    const modBgFps = mod && (mod.bgFps || mod.backgroundFps);
+    setBattleBackground(modBg, modBgFps);
+
     // 1. Party setup (supports INI overrides for maxHp, power, def, magic, color, name)
     const baseParty = [
         { id: 'kris',   name: 'KRIS',   hp: 90,  maxHp: 90,  power: 35, def: 0, magic: 0,  color: '#00ffff' },
@@ -1808,8 +1893,11 @@ async function prepareEnemyTurnImpl() {
     // 1. Check if a boss phase transition just occurred
     const newPhase = evaluatePhaseTriggers();
     const boss = activeEnemies()[0] || enemies[0];
-    if (newPhase && newPhase.boss_anim && boss) {
-        playEnemyAnim(boss, newPhase.boss_anim);
+    if (newPhase) {
+        if (newPhase.boss_anim && boss) playEnemyAnim(boss, newPhase.boss_anim);
+        if (newPhase.background || newPhase.bg) {
+            setBattleBackground(newPhase.background || newPhase.bg, newPhase.bgFps || newPhase.backgroundFps);
+        }
     }
 
     // 2. Pick this turn's GIF/image attack from the active phase (or global [ATTACKS])
@@ -2284,6 +2372,7 @@ function drawEffects() {
 
 // --- Update loop ---
 function update() {
+    updateBackground();
     updateParticles();
     updateAnimations();
     updateEffects();
@@ -2588,6 +2677,7 @@ function render() {
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
 
+    drawBackground();
     drawTPMeter();
     drawSprites();
     drawPartyUI();
@@ -2736,11 +2826,14 @@ function frame(now) {
     requestAnimationFrame(frame);
 }
 
-tryAutoLoadDefaultIni().catch(() => false).then(autoLoaded => {
+Promise.all([
+    tryAutoLoadDefaultIni().catch(() => false),
+    loadDefaultBackground()
+]).then(([autoLoaded]) => {
     // A mod that ships with the page (auto-loaded encounter.ini) hides the README / LOAD MOD buttons.
     setupModLoaderUI(!autoLoaded);
     initBattle();
-    // Font lives in GAME/ASSETS/fonts and is declared with @font-face in index.html (optional).
+    // Font lives in GAME/ASSETS/fonts and is declared with @font-face in index.html.
     Promise.resolve(document.fonts.load(`bold 16px ${FONT_FAMILY}`)).catch(() => {})
         .then(() => document.fonts.ready)
         .then(() => {
