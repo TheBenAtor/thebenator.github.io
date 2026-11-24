@@ -63,13 +63,18 @@ code{background:var(--bg);padding:1px 5px;border-radius:4px}
 <header>
   <h1>FIGHT EDITOR</h1>
   <button class="btn" id="bImport">Import INI</button>
-  <button class="btn" id="bMod">Load mod folder</button>
+  <button class="btn pri" id="bOpen" title="Grant access to your MOD folder so the editor can read and save encounter.ini directly (Chrome / Edge)">Open folder (edit)</button>
+  <button class="btn" id="bReopen" hidden>Reopen last folder</button>
+  <button class="btn" id="bMod" title="Read-only: previews assets, no saving to disk">Load mod folder</button>
   <button class="btn" id="bExample">Example</button>
   <button class="btn del" id="bNew">New</button>
   <span class="spacer"></span>
   <span id="modStatus" class="hint" style="margin:0"></span>
+  <span id="saveStatus" class="hint" style="margin:0"></span>
+  <label id="autoWrap" class="hint" style="margin:0;display:none;cursor:pointer"><input type="checkbox" id="autoSave"> auto-save</label>
+  <button class="btn pri" id="bSave" hidden>Save to folder</button>
   <button class="btn" id="bCopy">Copy INI</button>
-  <button class="btn pri" id="bDownload">Download encounter.ini</button>
+  <button class="btn" id="bDownload">Download encounter.ini</button>
   <input type="file" id="fIni" accept=".ini,.txt" hidden>
   <input type="file" id="fMod" webkitdirectory multiple hidden>
 </header>
@@ -128,6 +133,7 @@ function getImg(path,kind){
 }
 function loadModFiles(files){
   assets.forEach(a=>URL.revokeObjectURL(a.url)); assets=new Map(); imgCache.clear();
+  closeDir();
   let ini=null;
   for(const f of files){
     const rel=f.webkitRelativePath||f.name, parts=rel.split('/');
@@ -385,6 +391,7 @@ function update(){
   const P=analyze();
   document.getElementById('probs').innerHTML=P.length?P.map(([l,m])=>`<div class="${l}">${l==='err'?'✖':l==='warn'?'▲':'•'} ${esc(m)}</div>`).join(''):'<div class="ok">✔ No problems found</div>';
   try{localStorage.setItem('fightEditorState',JSON.stringify(S))}catch(_){}
+  afterUpdate();
 }
 function full(){renderNav();renderMain();update()}
 function fillInfo(){
@@ -591,6 +598,91 @@ damage = 18
 duration = 540
 fps = 12
 `;
+
+/* ============================ DIRECT FOLDER ACCESS (File System Access API) ============================ */
+let dirHandle=null, iniHandle=null, lastSaved='', backedUp=false, saveTimer=null;
+const FSA='showDirectoryPicker' in window;
+const setSave=(msg,bad)=>{const el=$('saveStatus');el.textContent=msg||'';el.style.color=bad?'var(--err)':'var(--ok)'};
+const idb={
+  open:()=>new Promise((res,rej)=>{const r=indexedDB.open('fightEditor',1);r.onupgradeneeded=()=>r.result.createObjectStore('h');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}),
+  async put(k,v){const d=await this.open();return new Promise((res,rej)=>{const t=d.transaction('h','readwrite');t.objectStore('h').put(v,k);t.oncomplete=res;t.onerror=()=>rej(t.error)})},
+  async get(k){const d=await this.open();return new Promise((res,rej)=>{const q=d.transaction('h').objectStore('h').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})}
+};
+function showSaveUI(){
+  const on=!!dirHandle;
+  $('bSave').hidden=!on;$('autoWrap').style.display=on?'':'none';
+  if(!on){setSave('')}
+}
+function closeDir(){dirHandle=null;iniHandle=null;backedUp=false;clearTimeout(saveTimer);showSaveUI()}
+async function ensurePerm(h){
+  const o={mode:'readwrite'};
+  return (await h.queryPermission(o))==='granted'||(await h.requestPermission(o))==='granted';
+}
+async function findIni(d){for(const n of ['encounter.ini','encounter.txt']){try{return await d.getFileHandle(n)}catch(_){}}return null}
+function setAssetEntries(entries){
+  assets.forEach(a=>URL.revokeObjectURL(a.url));assets=new Map();imgCache.clear();
+  for(const {file,path} of entries){
+    const e={url:URL.createObjectURL(file),file,path};
+    assets.set(norm(path),e);
+    const b=norm(path.split('/').pop());if(!assets.has(b))assets.set(b,e);
+  }
+  $('modStatus').textContent=`mod folder: ${entries.length} images`;
+}
+async function openDir(h){
+  if(!(await ensurePerm(h))){setSave('Permission denied',true);return}
+  let root=h,ih=await findIni(h);
+  if(!ih){try{const m=await h.getDirectoryHandle('MOD');root=m;ih=await findIni(m)}catch(_){}}
+  const entries=[];
+  async function walk(d,pre){
+    for await(const [name,e] of d.entries()){
+      if(name.startsWith('.')||name==='node_modules')continue;
+      if(e.kind==='directory')await walk(e,pre+name+'/');
+      else if(/\.(gif|png|jpe?g|webp)$/i.test(name))entries.push({file:await e.getFile(),path:pre+name});
+    }
+  }
+  setSave('Reading folder…');
+  await walk(root,'');
+  setAssetEntries(entries);
+  dirHandle=root;iniHandle=ih;backedUp=false;
+  try{await idb.put('last',h)}catch(_){}
+  if(ih){
+    if(!S.enemies.length||confirm(`Found ${ih.name} in "${root.name}". Load it into the editor? (replaces what's currently open)`)){
+      S=parseIni(await (await ih.getFile()).text());selEnemy=0;
+    }
+  }
+  lastSaved=ih?emit():'';
+  showSaveUI();
+  setSave(ih?`Editing ${root.name}/${ih.name}`:`No encounter.ini in ${root.name}; Save will create one`);
+  full();
+}
+async function saveToFolder(){
+  if(!dirHandle)return;
+  const text=emit();
+  try{
+    if(!(await ensurePerm(dirHandle)))throw new Error('permission denied');
+    if(iniHandle&&!backedUp){ // one backup per session so a first save can never lose hand-written comments
+      const old=await (await iniHandle.getFile()).text();
+      const bk=await dirHandle.getFileHandle(iniHandle.name+'.bak',{create:true});
+      const bw=await bk.createWritable();await bw.write(old);await bw.close();backedUp=true;
+    }
+    const fh=iniHandle||await dirHandle.getFileHandle('encounter.ini',{create:true});
+    const w=await fh.createWritable();await w.write(text);await w.close();
+    iniHandle=fh;lastSaved=text;
+    setSave(`Saved ${fh.name} at ${new Date().toLocaleTimeString()}`);
+  }catch(e){setSave('Save failed: '+e.message,true)}
+}
+function afterUpdate(){
+  if(!dirHandle)return;
+  const dirty=emit()!==lastSaved;
+  if(dirty&&!$('autoSave').checked)setSave('Unsaved changes',true);
+  if(dirty&&$('autoSave').checked){clearTimeout(saveTimer);saveTimer=setTimeout(saveToFolder,800)}
+}
+if(!FSA){$('bOpen').disabled=true;$('bOpen').title='Direct file editing needs Chrome or Edge'}
+$('bOpen').onclick=async()=>{try{await openDir(await window.showDirectoryPicker({mode:'readwrite'}))}catch(e){if(e.name!=='AbortError')setSave('Could not open: '+e.message,true)}};
+$('bReopen').onclick=async()=>{try{const h=await idb.get('last');if(h)await openDir(h)}catch(e){setSave('Could not reopen: '+e.message,true)}};
+$('bSave').onclick=saveToFolder;
+window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();dirHandle?saveToFolder():$('bDownload').click()}});
+if(FSA)idb.get('last').then(h=>{if(h)$('bReopen').hidden=false}).catch(()=>{});
 
 full();
 requestAnimationFrame(loop);
