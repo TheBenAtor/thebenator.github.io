@@ -41,6 +41,8 @@ The player controls **Kris, Susie and Ralsei**. Enemies attack by playing a **GI
 root/
 ├─ index.html
 ├─ README.md
+├─ editor/
+│  └─ index.html            <- the web fight editor (thebenator.github.io/editor)
 ├─ GAME/                    <- the engine (you don't edit this to make a fight)
 │  ├─ script.js
 │  └─ ASSETS/               <- base game assets
@@ -99,7 +101,7 @@ The engine uses the font `Determination` and falls back to `monospace`. For the 
 | **LOAD MOD button** | Click the small `LOAD MOD` button (top-right) and pick a mod folder (the folder that **contains** `encounter.ini`, such as `MOD`). |
 | **Drag and drop** | Drag a mod folder onto the game window. |
 
-The top-right corner has two small buttons: **README** (opens this guide on GitHub in a new tab) and **LOAD MOD**. **If a mod is auto-loaded, both buttons are hidden**, so a published fight shows only the game. Drag-and-drop still works either way, which is handy for testing a different mod over a published one.
+The top-right corner has three small buttons: **README** (opens this guide on GitHub in a new tab), **EDITOR** (opens the [fight editor](#fight-editor) in a new tab) and **LOAD MOD**. **If a mod is auto-loaded, all three buttons are hidden**, so a published fight shows only the game. Drag-and-drop still works either way, which is handy for testing a different mod over a published one.
 
 **Browsers block `fetch` and pixel reads on `file://` pages.** Opening `index.html` by double-clicking won't auto-load `MOD/`, and attack-GIF collision will fail (the canvas becomes tainted). Either use LOAD MOD or drag-and-drop (these always work), or run a local server from the project root:
 
@@ -107,6 +109,17 @@ The top-right corner has two small buttons: **README** (opens this guide on GitH
 python3 -m http.server 8000
 # then open http://localhost:8000
 ```
+
+### Fight editor
+
+Don't want to write the INI by hand? Use the web editor at **[thebenator.github.io/editor](https://thebenator.github.io/editor)**, or click **EDITOR** in the game's top-right corner. It is one self-contained page (`editor/index.html`) with a form for every section in this guide (enemies, animations, ACTs, phases, attack sequences and attack settings) and a live `encounter.ini` preview.
+
+- **Open folder (edit)** (Chrome / Edge): pick your `MOD` folder (or the project root) and allow access. The editor loads `encounter.ini`, previews your sprites and attack images, and **Save to folder** (or `Ctrl`/`Cmd`+`S`) writes `encounter.ini` straight back. The first save of a session keeps the old file as `encounter.ini.bak`, because the editor rewrites the whole file and drops hand-written comments. There is an optional auto-save.
+- **Load mod folder / Import INI / Download** work in any browser if you'd rather not grant write access.
+- **Checks as you type:** it flags invalid phase triggers, empty attack turns, missing asset files, attack images outside the 48–580 × 48–245 box limits, sprite frames past the end of a sheet, dialogue over about 70 characters and the other pitfalls listed in [Troubleshooting](#12-troubleshooting).
+- Drag an enemy on the preview screen to set its `x` / `y`, and play each named animation before you test in the game.
+
+The editor does not draw attack GIFs. Make those in your animation program (see [Making attack GIFs](#6-making-attack-gifs)) and the editor will preview them and check their size.
 
 If there is no `MOD/encounter.ini` and you load nothing, the engine runs a built-in demo with two enemies (Rudinn and Hathy) and simple aimed bullets.
 
