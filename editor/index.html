@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fight Editor</title>
+<style>
+:root{--bg:#0d0d12;--panel:#16161e;--panel2:#1d1d28;--line:#2c2c3c;--txt:#e6e6ee;--dim:#8a8aa0;--acc:#ffd400;--err:#ff5c5c;--warn:#ffb347;--info:#6cb6ff;--ok:#5fe08a}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif}
+button,input,textarea,select{font:inherit;color:inherit}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+header h1{font-size:16px;margin:0 12px 0 0;color:var(--acc);letter-spacing:.5px}
+.btn{background:var(--panel2);border:1px solid var(--line);padding:6px 12px;border-radius:6px;cursor:pointer}
+.btn:hover{border-color:var(--acc);color:var(--acc)}
+.btn.pri{background:var(--acc);color:#111;border-color:var(--acc);font-weight:600}
+.btn.pri:hover{filter:brightness(1.1);color:#111}
+.btn.sm{padding:2px 8px;font-size:12px}
+.btn.del:hover{border-color:var(--err);color:var(--err)}
+.spacer{flex:1}
+#app{display:grid;grid-template-columns:150px minmax(0,1fr) 380px;height:calc(100% - 55px)}
+nav{border-right:1px solid var(--line);padding:10px 0;overflow:auto}
+nav button{display:block;width:100%;text-align:left;background:none;border:0;border-left:3px solid transparent;padding:9px 14px;cursor:pointer;color:var(--dim)}
+nav button:hover{color:var(--txt)}
+nav button.on{color:var(--acc);border-left-color:var(--acc);background:var(--panel)}
+#main{overflow:auto;padding:16px 20px 60px}
+#side{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:var(--panel)}
+#side h3{margin:0;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--dim);border-bottom:1px solid var(--line)}
+#probs{max-height:34%;overflow:auto;padding:6px 12px;border-bottom:1px solid var(--line)}
+#probs div{padding:3px 0;font-size:13px}
+.err{color:var(--err)}.warn{color:var(--warn)}.info{color:var(--info)}.ok{color:var(--ok)}
+#ini{flex:1;margin:0;padding:10px 12px;overflow:auto;white-space:pre;font:12px/1.5 ui-monospace,Consolas,monospace;color:#cfd3ff}
+h2{margin:0 0 4px;font-size:18px}
+.sub{color:var(--dim);margin:0 0 16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:14px}
+.card h4{margin:0 0 10px;display:flex;align-items:center;gap:8px;font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.f{display:flex;flex-direction:column;gap:3px}
+.f.w2{grid-column:span 2}.f.wall{grid-column:1/-1}
+.f span{font-size:12px;color:var(--dim)}
+input[type=text],input[type=number],textarea,select{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:6px 8px;width:100%}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
+textarea{resize:vertical;min-height:54px}
+.chk{display:flex;align-items:center;gap:6px;align-self:end;padding:6px 0}
+.row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.row .lbl{width:58px;flex:none;color:var(--dim);font-size:12px}
+.row input{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{padding:4px 12px;border-radius:99px;border:1px solid var(--line);background:var(--panel2);cursor:pointer}
+.chip.on{border-color:var(--acc);color:var(--acc)}
+canvas{background:#000;border:1px solid var(--line);border-radius:4px;max-width:100%;image-rendering:pixelated}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:1100px){#app{grid-template-columns:120px 1fr}#side{display:none}.two{grid-template-columns:1fr}}
+.hint{color:var(--dim);font-size:12px;margin:4px 0 8px}
+.info-box{margin-top:8px;font-size:12px;color:var(--dim)}
+.info-box img{display:block;max-width:100%;max-height:200px;margin-top:4px;image-rendering:pixelated;background:#000;border:1px solid var(--line)}
+.sw{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;margin-right:6px;border:1px solid #fff4}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid var(--line);padding:6px 8px;text-align:left;font-size:13px}
+code{background:var(--bg);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>FIGHT EDITOR</h1>
+  <button class="btn" id="bImport">Import INI</button>
+  <button class="btn" id="bMod">Load mod folder</button>
+  <button class="btn" id="bExample">Example</button>
+  <button class="btn del" id="bNew">New</button>
+  <span class="spacer"></span>
+  <span id="modStatus" class="hint" style="margin:0"></span>
+  <button class="btn" id="bCopy">Copy INI</button>
+  <button class="btn pri" id="bDownload">Download encounter.ini</button>
+  <input type="file" id="fIni" accept=".ini,.txt" hidden>
+  <input type="file" id="fMod" webkitdirectory multiple hidden>
+</header>
+<div id="app">
+  <nav id="nav"></nav>
+  <div id="main"></div>
+  <aside id="side">
+    <h3>Problems</h3><div id="probs"></div>
+    <h3>encounter.ini (live)</h3><pre id="ini"></pre>
+  </aside>
+</div>
+
+<script>
+'use strict';
+/* ============================ STATE ============================ */
+const PARTY_IDS = ['kris','susie','ralsei'];
+const PARTY_DEF = {
+  kris:{maxHp:90,hp:90,power:35,def:0,magic:0,color:'#00ffff',name:'KRIS'},
+  susie:{maxHp:110,hp:110,power:50,def:0,magic:10,color:'#ff00ff',name:'SUSIE'},
+  ralsei:{maxHp:70,hp:70,power:25,def:0,magic:20,color:'#00ff21',name:'RALSEI'}
+};
+const F = {
+  str:()=>'',
+  enemy:()=>({name:'New Enemy',hp:'100',def:'0',x:'470',y:'80',scale:'2',sprite:'',frameW:'',frameH:'',fps:'',acts:'Check, Flatter',flavor:['* An enemy draws near!'],anims:[]}),
+  anim:()=>({name:'idle',frames:'0',ticks:'8',loop:true}),
+  act:()=>({name:'New',mercy:'50',tired:false,text:''}),
+  phase:()=>({num:'1',trigger:'',dialogue:'',boss_anim:'',flavor:[],ownAttacks:false,attacks:{turns:[''],loop:''}}),
+  meta:()=>({name:'',file:'',damage:'',duration:'',fps:'',boxW:'',boxH:'',boss_anim:'',dialogue:''})
+};
+function blank(){return{arena:{w:'',h:''},battle:{victoryText:'',gameOverText:''},party:{kris:{},susie:{},ralsei:{}},enemies:[],acts:[],attacks:{turns:[''],loop:''},phases:[],metas:[]}}
+let S = blank();
+let tab = 'general', selEnemy = 0, selAnim = 'idle';
+
+try{ const sv = localStorage.getItem('fightEditorState'); if(sv) S = Object.assign(blank(), JSON.parse(sv)); }catch(_){}
+
+const get=(p)=>p.split('.').reduce((o,k)=>o==null?undefined:o[k],S);
+function set(p,v){const ks=p.split('.');const last=ks.pop();const o=ks.reduce((o,k)=>o[k],S);o[last]=v}
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+const clean=v=>String(v).replace(/[\r\n]+/g,' ').trim();
+const has=v=>v!==undefined&&v!==null&&String(v).trim()!=='';
+
+/* ============================ ASSETS ============================ */
+let assets = new Map(); // key -> {url,file,path}
+const imgCache = new Map();
+const norm=p=>p.replace(/\\/g,'/').replace(/^\.\//,'').toLowerCase();
+function resolveAsset(path,kind){
+  if(!path||!assets.size) return null;
+  const n=norm(path), sub=kind==='enemy'?'enemy/':'attacks/';
+  return assets.get(n)||assets.get(sub+n)||assets.get(n.split('/').pop())||null;
+}
+function getImg(path,kind){
+  const a=resolveAsset(path,kind); if(!a) return null;
+  let c=imgCache.get(a.url);
+  if(!c){c={img:new Image(),ok:false};c.img.onload=()=>{c.ok=true;fillInfo();update()};c.img.src=a.url;imgCache.set(a.url,c)}
+  return c.ok?c.img:null;
+}
+function loadModFiles(files){
+  assets.forEach(a=>URL.revokeObjectURL(a.url)); assets=new Map(); imgCache.clear();
+  let ini=null;
+  for(const f of files){
+    const rel=f.webkitRelativePath||f.name, parts=rel.split('/');
+    const stripped=parts.length>1?parts.slice(1).join('/'):parts[0];
+    const url=URL.createObjectURL(f), e={url,file:f,path:stripped};
+    assets.set(norm(stripped),e);
+    const b=norm(parts[parts.length-1]); if(!assets.has(b)) assets.set(b,e);
+    if(b==='encounter.ini'||b==='encounter.txt') ini=f;
+  }
+  const n=new Set([...assets.values()]).size;
+  document.getElementById('modStatus').textContent=`mod folder: ${n} files`;
+  if(ini&&confirm('Found encounter.ini in this folder. Import it into the editor? (replaces current work)')){
+    ini.text().then(t=>{S=parseIni(t);selEnemy=0;full()});
+  } else full();
+}
+
+/* ============================ INI PARSE ============================ */
+function parseIni(text){
+  const s=blank(); s.attacks={turns:[],loop:''};
+  let sec=null,cur=null,lastEnemy=null;
+  const getPhase=n=>{let p=s.phases.find(p=>+p.num===n);if(!p){p=F.phase();p.num=String(n);p.attacks={turns:[],loop:''};s.phases.push(p)}return p};
+  for(const raw of text.split(/\r?\n/)){
+    const line=raw.trim(); if(!line||line[0]==='#'||line[0]===';') continue;
+    if(line[0]==='['&&line.endsWith(']')){
+      const h=line.slice(1,-1).trim(), u=h.toUpperCase();
+      if(u==='ARENA'){sec='arena';cur=s.arena}
+      else if(u==='BATTLE'){sec='battle';cur=s.battle}
+      else if(u.startsWith('PARTY_')){const id=h.slice(6).toLowerCase();sec='party';cur=s.party[id]=s.party[id]||{}}
+      else if(u==='ENEMY'||u==='BOSS'){sec='enemy';cur=F.enemy();cur.flavor=[];cur._f=false;s.enemies.push(cur);lastEnemy=cur}
+      else if(u.startsWith('ENEMY_ANIM:')||u.startsWith('BOSS_ANIM:')){sec='anim';cur=F.anim();cur.name=h.split(':')[1].trim();if(lastEnemy)lastEnemy.anims.push(cur)}
+      else if(u.startsWith('ACT:')){sec='act';cur=F.act();cur.name=h.slice(4).trim();s.acts.push(cur)}
+      else if(u.startsWith('PHASE_')&&u.endsWith('_ATTACKS')){const p=getPhase(parseInt(h.slice(6),10));p.ownAttacks=true;sec='tattacks';cur=p.attacks}
+      else if(u.startsWith('PHASE_')){sec='phase';cur=getPhase(parseInt(h.slice(6),10))}
+      else if(u==='ATTACKS'){sec='tattacks';cur=s.attacks}
+      else if(u.startsWith('ATTACK:')||u.startsWith('GIF:')){sec='meta';cur=F.meta();cur.name=h.slice(h.indexOf(':')+1).trim();s.metas.push(cur)}
+      else {sec=null;cur=null}
+      continue;
+    }
+    const i=line.indexOf('='); if(i<0||!cur) continue;
+    const k=line.slice(0,i).trim(), v=line.slice(i+1).trim(), kl=k.toLowerCase();
+    if(sec==='tattacks'){
+      if(kl==='loop') cur.loop=(v.toLowerCase()==='last')?'':v;
+      else if(!Number.isNaN(Number(k))&&Number(k)>=1){const n=Number(k);while(cur.turns.length<n)cur.turns.push('');cur.turns[n-1]=v.replace(/^\{|\}$/g,'')}
+      continue;
+    }
+    if((sec==='enemy'||sec==='phase')&&kl.startsWith('flavor')){cur.flavor.push(v);continue}
+    if(sec==='enemy'&&kl==='acts'){cur.acts=v;continue}
+    if((sec==='anim'&&kl==='loop')||(sec==='act'&&kl==='tired')){cur[k]=v!=='false';continue}
+    cur[k]=v;
+  }
+  s.enemies.forEach(e=>delete e._f);
+  if(!s.attacks.turns.length) s.attacks.turns=[''];
+  s.phases.sort((a,b)=>a.num-b.num);
+  return s;
+}
+
+/* ============================ INI EMIT ============================ */
+const poolOf=v=>String(v||'').replace(/^\s*\{|\}\s*$/g,'').split(',').map(s=>s.trim()).filter(Boolean);
+function emit(){
+  const L=[];const kv=(k,v)=>{if(has(v))L.push(`${k} = ${clean(v)}`)};
+  const sec=h=>{if(L.length)L.push('');L.push(`[${h}]`)};
+  L.push('# Generated by Fight Editor');
+  if(has(S.arena.w)||has(S.arena.h)){sec('ARENA');kv('w',S.arena.w);kv('h',S.arena.h)}
+  if(has(S.battle.victoryText)||has(S.battle.gameOverText)){sec('BATTLE');kv('victoryText',S.battle.victoryText);kv('gameOverText',S.battle.gameOverText)}
+  for(const id of PARTY_IDS){const p=S.party[id]||{};if(['maxHp','hp','power','def','magic','color','name'].some(k=>has(p[k]))){sec('PARTY_'+id.toUpperCase());['name','maxHp','hp','power','def','magic','color'].forEach(k=>kv(k,p[k]))}}
+  for(const e of S.enemies){
+    sec('ENEMY');
+    ['name','hp','def','x','y','scale','sprite','frameW','frameH','fps'].forEach(k=>kv(k,e[k]));
+    kv('acts',e.acts);
+    e.flavor.filter(has).forEach(f=>kv('flavor',f));
+    for(const a of e.anims){ if(!has(a.name))continue; sec('ENEMY_ANIM:'+clean(a.name)); kv('frames',a.frames);kv('ticks',a.ticks); if(a.loop===false)L.push('loop = false') }
+  }
+  for(const a of S.acts){ if(!has(a.name))continue; sec('ACT:'+clean(a.name)); kv('mercy',a.mercy); if(a.tired)L.push('tired = true'); kv('text',a.text) }
+  const emitAtk=(h,at)=>{ if(!at.turns.some(has))return; sec(h); at.turns.forEach((t,i)=>{if(has(t))L.push(`${i+1} = ${poolOf(t).join(', ')}`)}); if(has(at.loop))kv('loop',at.loop) };
+  const phases=S.phases.slice().sort((a,b)=>a.num-b.num);
+  for(const p of phases){
+    if(has(p.trigger)||has(p.dialogue)||has(p.boss_anim)||p.flavor.some(has)){sec('PHASE_'+p.num);kv('trigger',p.trigger);kv('dialogue',p.dialogue);kv('boss_anim',p.boss_anim);p.flavor.filter(has).forEach(f=>kv('flavor',f))}
+    if(p.ownAttacks) emitAtk(`PHASE_${p.num}_ATTACKS`,p.attacks);
+  }
+  emitAtk('ATTACKS',S.attacks);
+  for(const m of S.metas){ if(!has(m.name))continue; sec('ATTACK:'+clean(m.name)); ['file','damage','duration','fps','boxW','boxH','boss_anim','dialogue'].forEach(k=>kv(k,m[k])) }
+  return L.join('\n')+'\n';
+}
+
+/* ============================ ANALYSIS ============================ */
+function parseRange(spec,total){
+  const out=[];for(const part of String(spec).split(',')){const t=part.trim();
+    if(t.includes('-')){const [a,b]=t.split('-').map(n=>parseInt(n,10));for(let i=a;i<=b&&i<total;i++)out.push(i)}
+    else{const i=parseInt(t,10);if(!Number.isNaN(i)&&i<total)out.push(i)}}
+  return out.length?out:[0];
+}
+function analyze(){
+  const P=[];const add=(l,m)=>P.push([l,m]);
+  const mod=assets.size>0;
+  if(!S.enemies.length) add('info','No enemies: the engine will use its built-in demo (Rudinn & Hathy).');
+  if(!mod && (S.enemies.some(e=>has(e.sprite))||S.metas.length||S.attacks.turns.some(has))) add('info','Load your mod folder to verify asset files and see previews.');
+  const digitsOnly=v=>has(v)&&/^\d+$/.test(String(v).trim());
+  const lenCheck=(label,t)=>{if(digitsOnly(t))add('err',`${label}: text is only digits, the engine will parse it as a number.`);if(has(t)&&String(t).length>70)add('warn',`${label}: ${String(t).length} chars (bubble fits ~70).`)};
+  S.enemies.forEach((e,i)=>{
+    const n=e.name||('Enemy '+(i+1));
+    if(has(e.frameW)!==has(e.frameH)) add('warn',`${n}: set both frameW and frameH.`);
+    const sprite=has(e.sprite);
+    if(sprite&&mod){
+      if(!resolveAsset(e.sprite,'enemy')) add('err',`${n}: sprite "${e.sprite}" not found in mod folder.`);
+      else{const im=getImg(e.sprite,'enemy');if(im){
+        const fw=+e.frameW||im.naturalWidth,fh=+e.frameH||im.naturalHeight,sc=+e.scale||2;
+        if(+e.x+fw*sc>640||+e.y+fh*sc>280) add('warn',`${n}: sprite extends past x 640 / y 280 (${Math.round(+e.x+fw*sc)}×${Math.round(+e.y+fh*sc)}).`);
+        const total=Math.floor(im.naturalWidth/fw)*Math.floor(im.naturalHeight/fh);
+        e.anims.forEach(a=>{String(a.frames).split(/[,-]/).forEach(x=>{const k=parseInt(x,10);if(!Number.isNaN(k)&&k>=total)add('warn',`${n}: anim "${a.name}" uses frame ${k} but sheet has ${total} frames (0-${total-1}).`)})});
+      }}
+    }
+    e.flavor.forEach(f=>lenCheck(`${n} flavor`,f));
+    poolOf(e.acts).forEach(a=>{ if(a.toLowerCase()!=='check'&&!S.acts.some(x=>x.name.toLowerCase()===a.toLowerCase())) add('info',`${n}: ACT "${a}" has no definition (will give +50 mercy). Check gives nothing.`)});
+  });
+  const nums=S.phases.map(p=>+p.num);
+  S.phases.forEach(p=>{
+    if(nums.filter(n=>n===+p.num).length>1) add('err',`Phase number ${p.num} is used more than once.`);
+    if(+p.num===1&&has(p.trigger)) add('warn','Phase 1 has a trigger; it should start the fight without one.');
+    if(+p.num>1&&!has(p.trigger)) add('warn',`Phase ${p.num} has no trigger, so it never fires.`);
+    if(has(p.trigger)&&!/^\s*(hp_below\s*:\s*\d+(\.\d+)?%?|mercy_above\s*:\s*\d+(\.\d+)?|turn\s*:\s*\d+)\s*$/i.test(p.trigger)) add('err',`Phase ${p.num}: trigger "${p.trigger}" is not valid (hp_below:50%, mercy_above:60, turn:4).`);
+    lenCheck(`Phase ${p.num} dialogue`,p.dialogue);
+  });
+  const seqs=[['[ATTACKS]',S.attacks]].concat(S.phases.filter(p=>p.ownAttacks).map(p=>[`Phase ${p.num} attacks`,p.attacks]));
+  const used=new Set();
+  for(const [lab,at] of seqs){
+    let last=0;at.turns.forEach((t,i)=>{if(has(t))last=i+1});
+    for(let i=0;i<last;i++) if(!has(at.turns[i])) add('warn',`${lab}: turn ${i+1} is empty (built-in fallback bullets will play).`);
+    if(has(at.loop)&&(Number.isNaN(+at.loop)||+at.loop<1||+at.loop>last)&&last) add('warn',`${lab}: loop must be "last" or a turn number between 1 and ${last}.`);
+    at.turns.forEach(t=>poolOf(t).forEach(n=>used.add(n)));
+  }
+  S.phases.forEach(p=>{if(!p.ownAttacks&&p.attacks.turns.some(has)){}});
+  for(const n of used){
+    const m=S.metas.find(m=>m.name.toLowerCase()===n.toLowerCase());
+    const file=(m&&m.file)||n;
+    if(mod){
+      const a=resolveAsset(file,'attack');
+      if(!a) add('err',`Attack "${n}": file "${file}" not found in mod folder.`);
+      else{const im=getImg(file,'attack');if(im){let w=im.naturalWidth,h=im.naturalHeight;const sm=/_strip(\d+)\./i.exec(file);if(sm)w=Math.floor(w/+sm[1]);
+        if(!(m&&(has(m.boxW)||has(m.boxH)))&&(w<48||w>580||h<48||h>245)) add('warn',`Attack "${n}": ${w}×${h} is outside the 48–580 × 48–245 box limit; it will be scaled and hitboxes shift.`);
+        else if(h>180) add('info',`Attack "${n}": height ${h} > 180 overlaps the party panel.`)}}
+    }
+    if(!/[.]/.test(file)&&!m) add('warn',`Attack "${n}" has no file extension and no [ATTACK] settings, so it will look for a file literally named "${n}".`);
+  }
+  S.metas.forEach(m=>{lenCheck(`Attack "${m.name}" dialogue`,m.dialogue);if(has(m.name)&&!used.has(m.name)&&![...used].some(u=>u.toLowerCase()===m.name.toLowerCase())) add('info',`Attack settings "${m.name}" are never used in an attack list.`)});
+  S.acts.forEach(a=>lenCheck(`ACT ${a.name} text`,a.text));
+  if(has(S.battle.victoryText)&&!/restart/i.test(S.battle.victoryText)) add('info','victoryText should mention "(Z to restart)".');
+  if(has(S.battle.gameOverText)&&!/retry|restart/i.test(S.battle.gameOverText)) add('info','gameOverText should mention "(Z to retry)".');
+  return P;
+}
+
+/* ============================ UI HELPERS ============================ */
+function fld(label,path,o={}){
+  const v=get(path),t=o.type||'text';
+  if(t==='check') return `<label class="chk"><input type="checkbox" data-p="${path}" data-t="check" ${v?'checked':''}> ${label}</label>`;
+  if(t==='area') return `<label class="f ${o.cls||''}"><span>${label}</span><textarea data-p="${path}" placeholder="${esc(o.ph||'')}">${esc(v??'')}</textarea></label>`;
+  return `<label class="f ${o.cls||''}"><span>${label}</span><input type="${t}" ${t==='number'?'step="any"':''} data-p="${path}" value="${esc(v??'')}" placeholder="${esc(o.ph||'')}" ${o.list?`list="${o.list}"`:''}></label>`;
+}
+function listEditor(path,label,prefix,ph){
+  const arr=get(path)||[];
+  return arr.map((v,i)=>`<div class="row"><span class="lbl">${prefix}${prefix==='Turn '?i+1:''}</span><input type="text" data-p="${path}.${i}" value="${esc(v)}" placeholder="${esc(ph||'')}"><button class="btn sm del" data-act="remove" data-path="${path}" data-i="${i}">✕</button></div>`).join('')
+   +`<button class="btn sm" data-act="push" data-path="${path}" data-new="str">+ ${label}</button>`;
+}
+function turnsEditor(path){
+  return `<div class="hint">One row per enemy turn. Separate several files with commas to pick one at random.</div>`
+   +listEditor(path+'.turns','Add turn','Turn ','rain.gif, sweep.gif')
+   +`<div class="grid" style="margin-top:8px">${fld('loop (blank = last)',path+'.loop',{ph:'last'})}</div>`;
+}
+
+/* ============================ TABS ============================ */
+const TABS=[['general','General'],['party','Party'],['enemies','Enemies'],['acts','ACTs'],['phases','Phases'],['attacks','Attacks'],['help','Reference']];
+
+function tGeneral(){return `<h2>General</h2><p class="sub">Fallback arena size and win/lose messages. Leave blank for defaults.</p>
+<div class="card"><h4>Arena (fallback)</h4><div class="grid">${fld('w','arena.w',{type:'number',ph:'180'})}${fld('h','arena.h',{type:'number',ph:'150'})}</div>
+<div class="hint">Attacks resize the box to match their GIF; this only applies when an attack has no image.</div></div>
+<div class="card"><h4>Battle text</h4><div class="grid">${fld('victoryText','battle.victoryText',{cls:'wall',ph:'* YOU WON! Got 0 EXP and … D$. (Z to restart)'})}${fld('gameOverText','battle.gameOverText',{cls:'wall',ph:'* THE WORLD WAS COVERED IN DARKNESS. (Z to retry)'})}</div></div>`}
+
+function tParty(){return `<h2>Party</h2><p class="sub">Override stats. Blank fields use the engine's defaults (shown as placeholders).</p>`+PARTY_IDS.map(id=>{const d=PARTY_DEF[id];
+ return `<div class="card"><h4>${d.name}</h4><div class="grid">${['name','maxHp','hp','power','def','magic','color'].map(k=>fld(k,`party.${id}.${k}`,{type:['name','color'].includes(k)?'text':'number',ph:String(k==='hp'?'= maxHp':d[k])})).join('')}</div></div>`}).join('')}
+
+function tEnemies(){
+  const chips=`<div class="chips">${S.enemies.map((e,i)=>`<span class="chip ${i===selEnemy?'on':''}" data-act="selEnemy" data-i="${i}">${esc(e.name||'Enemy '+(i+1))}</span>`).join('')}<button class="btn sm" data-act="addEnemy">+ Add enemy</button></div>`;
+  if(!S.enemies.length) return `<h2>Enemies</h2><p class="sub">No enemies yet. Without any, the engine uses its demo fight.</p>${chips}`;
+  if(selEnemy>=S.enemies.length) selEnemy=0;
+  const p=`enemies.${selEnemy}`, e=S.enemies[selEnemy];
+  const animNames=['idle',...e.anims.map(a=>a.name).filter(n=>n&&n!=='idle')];
+  if(!animNames.includes(selAnim)) selAnim='idle';
+  return `<h2>Enemies</h2><p class="sub">Drag the enemy on the preview to position it.</p>${chips}
+<div class="two"><div>
+<div class="card"><h4>${esc(e.name)} <span class="spacer"></span><button class="btn sm del" data-act="removeEnemy">Delete</button></h4><div class="grid">
+${fld('name',p+'.name',{cls:'w2'})}${fld('hp',p+'.hp',{type:'number'})}${fld('def',p+'.def',{type:'number'})}
+${fld('x',p+'.x',{type:'number'})}${fld('y',p+'.y',{type:'number'})}${fld('scale',p+'.scale',{type:'number'})}
+${fld('sprite (ENEMY/…)',p+'.sprite',{cls:'w2',ph:'ENEMY/boss_sheet.png'})}${fld('fps',p+'.fps',{type:'number',ph:'8'})}
+${fld('frameW',p+'.frameW',{type:'number'})}${fld('frameH',p+'.frameH',{type:'number'})}
+${fld('acts (comma separated)',p+'.acts',{cls:'wall'})}</div>
+<div data-info="${esc(e.sprite)}|enemy" class="info-box"></div></div>
+<div class="card"><h4>Flavor text</h4><div class="hint">First line shows at the start of the fight, then a random one each turn.</div>${listEditor(p+'.flavor','Add line','Line ','* Something happens.')}</div>
+<div class="card"><h4>Animations</h4><div class="hint">frames: <code>3</code>, <code>0,1,2,1</code>, <code>4-7</code> or <code>0-3,5</code> (0-based). Put <code>idle</code> to override the default loop.</div>
+${e.anims.map((a,i)=>`<div class="card" style="background:var(--panel2)"><h4>${esc(a.name||'(unnamed)')} <span class="spacer"></span><button class="btn sm del" data-act="remove" data-path="${p}.anims" data-i="${i}">✕</button></h4><div class="grid">${fld('name',`${p}.anims.${i}.name`)}${fld('frames',`${p}.anims.${i}.frames`)}${fld('ticks (60/s)',`${p}.anims.${i}.ticks`,{type:'number'})}${fld('loop',`${p}.anims.${i}.loop`,{type:'check'})}</div></div>`).join('')}
+<button class="btn sm" data-act="push" data-path="${p}.anims" data-new="anim">+ Add animation</button></div>
+</div><div>
+<div class="card"><h4>Screen layout (640×480)</h4><canvas id="layoutC" width="640" height="480"></canvas></div>
+<div class="card"><h4>Animation preview <select id="animSel" style="width:auto;margin-left:auto">${animNames.map(n=>`<option ${n===selAnim?'selected':''}>${esc(n)}</option>`).join('')}</select></h4><canvas id="animC" width="256" height="200"></canvas></div>
+<div class="card"><h4>Sprite sheet frames</h4><canvas id="sheetC" width="480" height="200"></canvas><div class="hint">Frame numbers for use in animations.</div></div>
+</div></div>`;
+}
+
+function tActs(){return `<h2>ACTs</h2><p class="sub">Global definitions, matched by name (case-insensitive) against each enemy's <code>acts</code> list.</p>
+<div style="margin-bottom:12px"><button class="btn" data-act="push" data-path="acts" data-new="act">+ Add ACT</button> <button class="btn" data-act="syncActs">Add missing from enemies</button></div>
+${S.acts.map((a,i)=>`<div class="card"><h4>${esc(a.name)} <span class="spacer"></span><button class="btn sm del" data-act="remove" data-path="acts" data-i="${i}">✕</button></h4><div class="grid">${fld('name',`acts.${i}.name`)}${fld('mercy %',`acts.${i}.mercy`,{type:'number'})}${fld('makes TIRED',`acts.${i}.tired`,{type:'check'})}${fld('text',`acts.${i}.text`,{cls:'wall',type:'area',ph:'* You do a thing.'})}</div></div>`).join('')||'<p class="hint">No ACTs defined.</p>'}`}
+
+function tPhases(){return `<h2>Phases</h2><p class="sub">Phase 1 starts the fight (no trigger). Others fire once when their trigger is met; at most one per turn.</p>
+<datalist id="trig"><option value="hp_below:50%"><option value="hp_below:120"><option value="mercy_above:60"><option value="turn:4"></datalist>
+<div style="margin-bottom:12px"><button class="btn" data-act="addPhase">+ Add phase</button></div>
+${S.phases.map((p,i)=>`<div class="card"><h4>Phase ${esc(p.num)} <span class="spacer"></span><button class="btn sm del" data-act="remove" data-path="phases" data-i="${i}">✕</button></h4>
+<div class="grid">${fld('number',`phases.${i}.num`,{type:'number'})}${fld('trigger',`phases.${i}.trigger`,{cls:'w2',ph:i?'hp_below:50%':'(none for phase 1)',list:'trig'})}${fld('boss_anim',`phases.${i}.boss_anim`,{ph:'angry'})}${fld('dialogue',`phases.${i}.dialogue`,{cls:'wall',ph:'Boss line (≤70 chars)'})}</div>
+<h4 style="margin-top:12px">Flavor pool (replaces enemy's while active)</h4>${listEditor(`phases.${i}.flavor`,'Add line','Line ')}
+<h4 style="margin-top:14px">${fld('Use own attack list for this phase',`phases.${i}.ownAttacks`,{type:'check'})}</h4>
+${p.ownAttacks?turnsEditor(`phases.${i}.attacks`):'<div class="hint">Uses the global [ATTACKS] list.</div>'}</div>`).join('')||'<p class="hint">No phases. The fight uses the global attack list only.</p>'}`}
+
+function usedAttackNames(){
+  const set=new Set();[S.attacks,...S.phases.filter(p=>p.ownAttacks).map(p=>p.attacks)].forEach(a=>a.turns.forEach(t=>poolOf(t).forEach(n=>set.add(n))));return [...set];
+}
+function tAttacks(){
+  const missing=usedAttackNames().filter(n=>!S.metas.some(m=>m.name.toLowerCase()===n.toLowerCase()));
+  const files=[...new Set([...assets.values()])].filter(a=>/\.(gif|png|jpg|jpeg)$/i.test(a.path)&&/attacks\//i.test(a.path)).map(a=>a.path);
+  return `<h2>Attacks</h2><p class="sub">The global sequence, plus optional per-attack settings (damage, duration, dialogue…).</p>
+<div class="card"><h4>Global sequence [ATTACKS]</h4>${turnsEditor('attacks')}</div>
+${files.length?`<div class="card"><h4>Files in ATTACKS/</h4><div class="hint">${files.map(esc).join(' &nbsp;·&nbsp; ')}</div></div>`:''}
+<div style="margin-bottom:12px"><button class="btn" data-act="push" data-path="metas" data-new="meta">+ Add attack settings</button> ${missing.map(n=>`<button class="btn sm" data-act="addMeta" data-name="${esc(n)}">+ ${esc(n)}</button>`).join(' ')}</div>
+${S.metas.map((m,i)=>`<div class="card"><h4>${esc(m.name||'(unnamed)')} <span class="spacer"></span><button class="btn sm del" data-act="remove" data-path="metas" data-i="${i}">✕</button></h4><div class="grid">
+${fld('name (as used in lists)',`metas.${i}.name`,{cls:'w2'})}${fld('file',`metas.${i}.file`,{cls:'w2',ph:'ATTACKS/'+(m.name||'x')+'.gif'})}
+${fld('damage',`metas.${i}.damage`,{type:'number',ph:'18'})}${fld('duration (frames @60)',`metas.${i}.duration`,{type:'number',ph:'480'})}${fld('fps',`metas.${i}.fps`,{type:'number'})}${fld('boss_anim',`metas.${i}.boss_anim`)}
+${fld('boxW (override)',`metas.${i}.boxW`,{type:'number'})}${fld('boxH (override)',`metas.${i}.boxH`,{type:'number'})}
+${fld('dialogue',`metas.${i}.dialogue`,{cls:'wall',ph:'Boss line before the attack'})}</div>
+<div class="info-box" data-info="${esc(m.file||m.name)}|attack"></div></div>`).join('')}`;
+}
+
+function tHelp(){return `<h2>Reference</h2><p class="sub">Quick facts from the README.</p>
+<div class="card"><h4>Attack GIF hit colors</h4><table><tr><th>Color</th><th>Hurts</th><th>Use</th></tr>
+<tr><td><span class="sw" style="background:#fff"></span>White</td><td>always</td><td>#FFFFFF</td></tr>
+<tr><td><span class="sw" style="background:#0ff"></span>Cyan</td><td>only if moving</td><td>#00FFFF</td></tr>
+<tr><td><span class="sw" style="background:#f90"></span>Orange</td><td>only if standing still</td><td>#FF9900</td></tr></table>
+<div class="hint" style="margin-top:8px">No anti-aliasing or dithering. Keep the center clear on frame 1. Leave gaps ≥ 20 px. GIF size = box size (48–580 × 48–245, keep height ≤ 180).</div></div>
+<div class="card"><h4>Phase triggers</h4><code>hp_below:50%</code> <code>hp_below:120</code> <code>mercy_above:60</code> <code>turn:4</code></div>
+<div class="card"><h4>Gotchas</h4><div class="hint">No quotes, no inline comments. Text made of only digits becomes a number. Auto-load on GitHub Pages is case-sensitive: use <code>ENEMY</code> and <code>ATTACKS</code> folders exactly. ACTs are global. Turn gaps fall back to built-in bullets.</div></div>`}
+
+const RENDER={general:tGeneral,party:tParty,enemies:tEnemies,acts:tActs,phases:tPhases,attacks:tAttacks,help:tHelp};
+
+/* ============================ RENDER / UPDATE ============================ */
+function renderNav(){document.getElementById('nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-tab="${k}">${l}</button>`).join('')}
+function renderMain(){document.getElementById('main').innerHTML=RENDER[tab]();fillInfo();bindAnimSel()}
+function update(){
+  const ini=emit();
+  document.getElementById('ini').textContent=ini;
+  const P=analyze();
+  document.getElementById('probs').innerHTML=P.length?P.map(([l,m])=>`<div class="${l}">${l==='err'?'✖':l==='warn'?'▲':'•'} ${esc(m)}</div>`).join(''):'<div class="ok">✔ No problems found</div>';
+  try{localStorage.setItem('fightEditorState',JSON.stringify(S))}catch(_){}
+}
+function full(){renderNav();renderMain();update()}
+function fillInfo(){
+  document.querySelectorAll('[data-info]').forEach(el=>{
+    const [path,kind]=el.dataset.info.split('|');
+    if(!path){el.innerHTML='';return}
+    const a=resolveAsset(path,kind);
+    if(!assets.size){el.textContent='Load a mod folder to preview this file.';return}
+    if(!a){el.innerHTML=`<span class="err">Not found in mod folder: ${esc(path)}</span>`;return}
+    const im=getImg(path,kind);let dims='';
+    if(im){let w=im.naturalWidth;const sm=/_strip(\d+)\./i.exec(path);dims=sm?`strip of ${sm[1]} frames, each ${Math.floor(w/+sm[1])}×${im.naturalHeight}`:`${w}×${im.naturalHeight}`}
+    el.innerHTML=`${esc(a.path)} ${dims?'· '+dims:''}<img src="${a.url}">`;
+  });
+}
+function bindAnimSel(){const s=document.getElementById('animSel');if(s)s.onchange=()=>{selAnim=s.value}}
+
+/* ============================ EVENTS ============================ */
+const main=document.getElementById('main');
+main.addEventListener('input',e=>{
+  const t=e.target,p=t.dataset&&t.dataset.p;if(!p)return;
+  set(p,t.dataset.t==='check'?t.checked:t.value);update();
+  if(/^enemies\.\d+\.sprite$/.test(p)) fillInfo();
+  if(/^metas\.\d+\.(file|name)$/.test(p)) fillInfo();
+});
+main.addEventListener('change',e=>{
+  const p=e.target.dataset&&e.target.dataset.p; if(!p)return;
+  if(/\.(name|num|ownAttacks)$/.test(p)||/ownAttacks/.test(p)){renderMain()}
+});
+main.addEventListener('click',e=>{
+  const b=e.target.closest('[data-act]');if(!b)return;
+  const act=b.dataset.act,path=b.dataset.path,i=+b.dataset.i;
+  if(act==='push'){const arr=get(path);arr.push(F[b.dataset.new]())}
+  else if(act==='remove'){get(path).splice(i,1)}
+  else if(act==='selEnemy'){selEnemy=i}
+  else if(act==='addEnemy'){S.enemies.push(F.enemy());selEnemy=S.enemies.length-1}
+  else if(act==='removeEnemy'){if(!confirm('Delete this enemy?'))return;S.enemies.splice(selEnemy,1);selEnemy=0}
+  else if(act==='addPhase'){const p=F.phase();const n=S.phases.reduce((m,x)=>Math.max(m,+x.num),0)+1;p.num=String(n);if(n>1)p.trigger='hp_below:50%';S.phases.push(p)}
+  else if(act==='addMeta'){const m=F.meta();m.name=b.dataset.name;S.metas.push(m)}
+  else if(act==='syncActs'){
+    const names=new Set(S.acts.map(a=>a.name.toLowerCase()));
+    S.enemies.forEach(en=>poolOf(en.acts).forEach(n=>{if(!names.has(n.toLowerCase())){names.add(n.toLowerCase());const a=F.act();a.name=n;if(n.toLowerCase()==='check')a.mercy='0';S.acts.push(a)}}));
+  }
+  renderMain();update();
+});
+document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b){tab=b.dataset.tab;renderNav();renderMain()}});
+
+const $=id=>document.getElementById(id);
+$('bImport').onclick=()=>$('fIni').click();
+$('fIni').onchange=async e=>{const f=e.target.files[0];if(!f)return;S=parseIni(await f.text());selEnemy=0;full();e.target.value=''};
+$('bMod').onclick=()=>$('fMod').click();
+$('fMod').onchange=e=>{if(e.target.files.length)loadModFiles(e.target.files);e.target.value=''};
+$('bNew').onclick=()=>{if(confirm('Clear everything and start over?')){S=blank();selEnemy=0;full()}};
+$('bExample').onclick=()=>{if(confirm('Replace current work with the example fight?')){S=parseIni(EXAMPLE);selEnemy=0;full()}};
+$('bCopy').onclick=async()=>{try{await navigator.clipboard.writeText(emit());$('bCopy').textContent='Copied!';setTimeout(()=>$('bCopy').textContent='Copy INI',1200)}catch(_){alert('Copy failed — select the text on the right instead.')}};
+$('bDownload').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([emit()],{type:'text/plain'}));a.download='encounter.ini';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500)};
+window.addEventListener('dragover',e=>e.preventDefault());
+window.addEventListener('drop',async e=>{e.preventDefault();const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f&&/\.(ini|txt)$/i.test(f.name)){S=parseIni(await f.text());selEnemy=0;full()}});
+
+/* ============================ CANVAS PREVIEWS ============================ */
+function enemyBox(e){
+  const im=getImg(e.sprite,'enemy'),sc=+e.scale||2;
+  if(im){const fw=+e.frameW||im.naturalWidth,fh=+e.frameH||im.naturalHeight;return{im,fw,fh,w:fw*sc,h:fh*sc}}
+  return{im:null,fw:40,fh:40,w:40,h:40};
+}
+function drawFrame(c,im,fw,fh,idx,dx,dy,dw,dh){
+  const cols=Math.max(1,Math.floor(im.naturalWidth/fw));
+  c.drawImage(im,(idx%cols)*fw,Math.floor(idx/cols)*fh,fw,fh,dx,dy,dw,dh);
+}
+function animIndices(e,name,im,fw,fh){
+  const total=im?Math.max(1,Math.floor(im.naturalWidth/fw))*Math.max(1,Math.floor(im.naturalHeight/fh)):1;
+  const a=e.anims.find(a=>a.name===name);
+  if(a) return {idx:parseRange(a.frames,total),ticks:Math.max(1,+a.ticks||8),loop:a.loop!==false};
+  return {idx:Array.from({length:total},(_,i)=>i),ticks:Math.max(2,Math.round(60/(+e.fps||8))),loop:true};
+}
+function frameAt(e,name,im,fw,fh,t){
+  const an=animIndices(e,name,im,fw,fh),step=Math.floor(t/(1000/60)/an.ticks);
+  return an.idx[an.loop?step%an.idx.length:Math.min(step,an.idx.length-1)];
+}
+function loop(t){
+  if(tab==='enemies'&&S.enemies[selEnemy]){
+    const e=S.enemies[selEnemy];
+    const L=$$('layoutC');if(L){const c=L.getContext('2d');c.imageSmoothingEnabled=false;
+      c.fillStyle='#000';c.fillRect(0,0,640,480);
+      c.fillStyle='#111';c.fillRect(0,280,640,200);
+      [98,182,266].forEach((fy,i)=>{c.fillStyle=['#0ff','#f0f','#0f2'][i]+'55';c.fillRect(135-17,fy-76,34,76)});
+      const aw=+S.arena.w||180,ah=+S.arena.h||150;
+      c.strokeStyle='#0f0';c.lineWidth=4;c.strokeRect(320-aw/2,190-ah/2,aw,ah);
+      c.fillStyle='#fff4';c.font='11px monospace';c.fillText('arena (fallback size)',320-aw/2+6,190-ah/2+14);
+      S.enemies.forEach((en,i)=>{const b=enemyBox(en),x=+en.x||0,y=+en.y||0;
+        if(b.im){drawFrame(c,b.im,b.fw,b.fh,frameAt(en,'idle',b.im,b.fw,b.fh,t),x,y,b.w,b.h)}else{c.fillStyle='#00ff77';c.fillRect(x,y,40,40)}
+        c.fillStyle='#fff';c.font='14px monospace';c.fillText(en.name||'',x-5,y-8);
+        if(i===selEnemy){c.strokeStyle='#ffd400';c.lineWidth=1;c.setLineDash([4,3]);c.strokeRect(x,y,b.w,b.h);c.setLineDash([])}});
+      c.strokeStyle='#f554';c.lineWidth=1;c.strokeRect(0,0,640,280);
+    }
+    const A=$$('animC');if(A){const c=A.getContext('2d');c.imageSmoothingEnabled=false;c.clearRect(0,0,A.width,A.height);c.fillStyle='#000';c.fillRect(0,0,A.width,A.height);
+      const b=enemyBox(e);if(b.im){const s=Math.min(A.width/b.fw,A.height/b.fh,4),w=b.fw*s,h=b.fh*s;drawFrame(c,b.im,b.fw,b.fh,frameAt(e,selAnim,b.im,b.fw,b.fh,t),(A.width-w)/2,(A.height-h)/2,w,h)}else{c.fillStyle='#888';c.font='12px sans-serif';c.fillText('No sprite loaded (load mod folder)',10,20)}}
+    const Sh=$$('sheetC');if(Sh){const c=Sh.getContext('2d');c.imageSmoothingEnabled=false;c.fillStyle='#000';c.fillRect(0,0,Sh.width,Sh.height);
+      const b=enemyBox(e);if(b.im){const s=Math.min(Sh.width/b.im.naturalWidth,Sh.height/b.im.naturalHeight);c.drawImage(b.im,0,0,b.im.naturalWidth*s,b.im.naturalHeight*s);
+        const cols=Math.max(1,Math.floor(b.im.naturalWidth/b.fw)),rows=Math.max(1,Math.floor(b.im.naturalHeight/b.fh));
+        c.strokeStyle='#ffd400aa';c.fillStyle='#ffd400';c.font='11px monospace';c.lineWidth=1;
+        for(let r=0;r<rows;r++)for(let k=0;k<cols;k++){c.strokeRect(k*b.fw*s+.5,r*b.fh*s+.5,b.fw*s,b.fh*s);c.fillText(r*cols+k,k*b.fw*s+3,r*b.fh*s+12)}}
+      else{c.fillStyle='#888';c.font='12px sans-serif';c.fillText('No sprite loaded',10,20)}}
+  }
+  requestAnimationFrame(loop);
+}
+const $$=id=>document.getElementById(id);
+// dragging enemies on the layout canvas
+let drag=null;
+function canvasPos(ev){const c=$$('layoutC'),r=c.getBoundingClientRect();return{x:(ev.clientX-r.left)*640/r.width,y:(ev.clientY-r.top)*480/r.height}}
+main.addEventListener('pointerdown',ev=>{
+  if(ev.target.id!=='layoutC')return;
+  const p=canvasPos(ev);
+  for(let i=S.enemies.length-1;i>=0;i--){const en=S.enemies[i],b=enemyBox(en),x=+en.x||0,y=+en.y||0;
+    if(p.x>=x&&p.x<=x+b.w&&p.y>=y&&p.y<=y+b.h){
+      if(i!==selEnemy){selEnemy=i;renderMain()}
+      drag={i,dx:p.x-x,dy:p.y-y};ev.target.setPointerCapture&&ev.target.setPointerCapture(ev.pointerId);return}}
+});
+main.addEventListener('pointermove',ev=>{
+  if(!drag||ev.target.id!=='layoutC')return;
+  const p=canvasPos(ev),en=S.enemies[drag.i];
+  en.x=String(Math.round(p.x-drag.dx));en.y=String(Math.round(p.y-drag.dy));
+  document.querySelectorAll(`[data-p="enemies.${drag.i}.x"],[data-p="enemies.${drag.i}.y"]`).forEach(inp=>{inp.value=get(inp.dataset.p)});
+  update();
+});
+window.addEventListener('pointerup',()=>{drag=null});
+
+/* ============================ EXAMPLE ============================ */
+const EXAMPLE=`[BATTLE]
+victoryText = * The Warden powers down. Got 0 EXP and 200 D$. (Z to restart)
+gameOverText = * YOUR SIGNAL WAS LOST. (Z to retry)
+
+[ENEMY]
+name = Glitch Warden
+hp = 400
+def = 2
+x = 440
+y = 40
+scale = 2
+sprite = ENEMY/warden_sheet.png
+frameW = 64
+frameH = 80
+acts = Check, Calm, Taunt
+flavor = * The Warden's outline flickers into view.
+flavor = * Static crawls across the floor.
+
+[ENEMY_ANIM:idle]
+frames = 0-3
+ticks = 10
+
+[ENEMY_ANIM:angry]
+frames = 4-7
+ticks = 6
+loop = false
+
+[ACT:Check]
+mercy = 0
+text = * WARDEN - ATK 12 DEF 2. Hates loud noises.
+
+[ACT:Calm]
+mercy = 30
+text = * You hum quietly. The flicker steadies.
+
+[ACT:Taunt]
+mercy = 0
+tired = true
+text = * You mock the Warden. It slumps, exhausted.
+
+[PHASE_1_ATTACKS]
+1 = rain
+2 = rain, sweep
+3 = sweep
+loop = 2
+
+[PHASE_2]
+trigger = hp_below:50%
+dialogue = Y-YOU... CAN'T... DELETE ME!
+boss_anim = angry
+flavor = * The Warden's outline tears apart.
+
+[PHASE_2_ATTACKS]
+1 = storm
+2 = storm, spiral
+loop = 1
+
+[ATTACK:rain]
+file = ATTACKS/rain.gif
+damage = 14
+duration = 420
+
+[ATTACK:sweep]
+file = ATTACKS/sweep.gif
+damage = 16
+
+[ATTACK:storm]
+file = ATTACKS/storm.gif
+damage = 20
+duration = 600
+boss_anim = angry
+dialogue = HOLD STILL!
+
+[ATTACK:spiral]
+file = ATTACKS/spiral_strip8.png
+damage = 18
+duration = 540
+fps = 12
+`;
+
+full();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
