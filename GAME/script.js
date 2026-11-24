@@ -2704,8 +2704,10 @@ function render() {
 // SERVERLESS MOD FOLDER LOADER (DRAG & DROP + TOP-RIGHT BUTTON)
 // ============================================================================
 const README_URL = 'https://github.com/TheBenAtor/thebenator.github.io';
+// Relative on purpose: resolves to https://thebenator.github.io/editor/ when hosted, and works on local servers too.
+const EDITOR_URL = 'editor/';
 
-// Top-right toolbar: README + LOAD MOD. Only created when no encounter was auto-loaded.
+// Top-right toolbar: README + EDITOR + LOAD MOD. Only created when no encounter was auto-loaded.
 function createToolbarButtons(applyFiles) {
     const input = document.createElement('input');
     input.type = 'file';
@@ -2736,6 +2738,7 @@ function createToolbarButtons(applyFiles) {
     };
 
     makeBtn('README', () => window.open(README_URL, '_blank', 'noopener'));
+    makeBtn('EDITOR', () => window.open(EDITOR_URL, '_blank', 'noopener'));
     makeBtn('LOAD MOD', () => input.click());
     document.body.appendChild(bar);
 }
@@ -2830,7 +2833,7 @@ Promise.all([
     tryAutoLoadDefaultIni().catch(() => false),
     loadDefaultBackground()
 ]).then(([autoLoaded]) => {
-    // A mod that ships with the page (auto-loaded encounter.ini) hides the README / LOAD MOD buttons.
+    // A mod that ships with the page (auto-loaded encounter.ini) hides the README / EDITOR / LOAD MOD buttons.
     setupModLoaderUI(!autoLoaded);
     initBattle();
     // Font lives in GAME/ASSETS/fonts and is declared with @font-face in index.html.
