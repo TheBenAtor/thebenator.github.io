@@ -2844,3 +2844,168 @@ Promise.all([
             requestAnimationFrame(frame);
         });
 });
+
+// ============================================================================
+// MOBILE FLOATING 8-WAY JOYSTICK & Z/X/C CONTROLS
+// ============================================================================
+(function initMobileControls() {
+    // Only show on touch-capable devices (remove this check if testing on desktop mouse)
+    const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if (!isTouchDevice) return;
+
+    // Helper to trigger your engine's exact keydown/keyup logic and keys[] state
+    function setVirtualKey(key, isDown) {
+        const k = key.toLowerCase();
+        if (Boolean(keys[k]) === isDown) return; // Avoid duplicate spam
+        keys[k] = isDown;
+        window.dispatchEvent(new KeyboardEvent(isDown ? 'keydown' : 'keyup', {
+            key: key,
+            bubbles: true
+        }));
+    }
+
+    // 1. Floating Joystick Elements (Left Side)
+    const joyZone = document.createElement('div');
+    Object.assign(joyZone.style, {
+        position: 'fixed', left: '0', top: '0', width: '55vw', height: '100vh',
+        zIndex: '900', touchAction: 'none'
+    });
+
+    const joyBase = document.createElement('div');
+    Object.assign(joyBase.style, {
+        position: 'fixed', width: '110px', height: '110px', borderRadius: '50%',
+        border: '2px solid rgba(255, 255, 255, 0.5)',
+        background: 'rgba(0, 0, 0, 0.35)',
+        display: 'none', pointerEvents: 'none', zIndex: '901',
+        transform: 'translate(-50%, -50%)'
+    });
+
+    const joyNub = document.createElement('div');
+    Object.assign(joyNub.style, {
+        position: 'absolute', left: '50%', top: '50%',
+        width: '44px', height: '44px', borderRadius: '50%',
+        background: 'rgba(255, 0, 0, 0.85)', // Deltarune SOUL red
+        border: '2px solid #ffffff',
+        transform: 'translate(-50%, -50%)'
+    });
+    joyBase.appendChild(joyNub);
+    document.body.appendChild(joyZone);
+    document.body.appendChild(joyBase);
+
+    let joyPointerId = null;
+    let originX = 0, originY = 0;
+    const maxRadius = 38;
+    const deadzone = 12;
+
+    function updateDpadFromAngle(dx, dy, dist) {
+        let up = false, down = false, left = false, right = false;
+
+        if (dist >= deadzone) {
+            const deg = (Math.atan2(dy, dx) * (180 / Math.PI) + 360) % 360;
+            if (deg >= 337.5 || deg < 22.5)        { right = true; }
+            else if (deg >= 22.5 && deg < 67.5)    { right = true; down = true; }
+            else if (deg >= 67.5 && deg < 112.5)   { down = true; }
+            else if (deg >= 112.5 && deg < 157.5)  { down = true; left = true; }
+            else if (deg >= 157.5 && deg < 202.5)  { left = true; }
+            else if (deg >= 202.5 && deg < 247.5)  { left = true; up = true; }
+            else if (deg >= 247.5 && deg < 292.5)  { up = true; }
+            else if (deg >= 292.5 && deg < 337.5)  { up = true; right = true; }
+        }
+
+        setVirtualKey('ArrowUp', up);
+        setVirtualKey('ArrowDown', down);
+        setVirtualKey('ArrowLeft', left);
+        setVirtualKey('ArrowRight', right);
+    }
+
+    joyZone.addEventListener('pointerdown', (e) => {
+        if (joyPointerId !== null) return;
+        joyPointerId = e.pointerId;
+        joyZone.setPointerCapture(e.pointerId);
+
+        originX = e.clientX;
+        originY = e.clientY;
+        joyBase.style.left = `${originX}px`;
+        joyBase.style.top = `${originY}px`;
+        joyBase.style.display = 'block';
+        joyNub.style.transform = 'translate(-50%, -50%)';
+    });
+
+    joyZone.addEventListener('pointermove', (e) => {
+        if (e.pointerId !== joyPointerId) return;
+        const dx = e.clientX - originX;
+        const dy = e.clientY - originY;
+        const dist = Math.hypot(dx, dy);
+        const angle = Math.atan2(dy, dx);
+
+        const clamped = Math.min(dist, maxRadius);
+        const nx = Math.cos(angle) * clamped;
+        const ny = Math.sin(angle) * clamped;
+        joyNub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
+
+        updateDpadFromAngle(dx, dy, dist);
+    });
+
+    const releaseJoystick = (e) => {
+        if (e.pointerId !== joyPointerId) return;
+        joyPointerId = null;
+        joyBase.style.display = 'none';
+        updateDpadFromAngle(0, 0, 0);
+    };
+    joyZone.addEventListener('pointerup', releaseJoystick);
+    joyZone.addEventListener('pointercancel', releaseJoystick);
+
+    // 2. Z / X / C Action Buttons (Bottom-Right)
+    const btnContainer = document.createElement('div');
+    Object.assign(btnContainer.style, {
+        position: 'fixed', right: '20px', bottom: '24px',
+        display: 'flex', gap: '12px', alignItems: 'flex-end',
+        zIndex: '910', touchAction: 'none'
+    });
+
+    function createActionButton(label, keyName, size, borderColor) {
+        const btn = document.createElement('div');
+        btn.textContent = label;
+        Object.assign(btn.style, {
+            width: `${size}px`, height: `${size}px`, borderRadius: '50%',
+            background: 'rgba(0, 0, 0, 0.55)',
+            border: `2px solid ${borderColor}`,
+            color: borderColor,
+            fontFamily: FONT_FAMILY, fontSize: `${Math.round(size * 0.36)}px`,
+            fontWeight: 'bold', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', touchAction: 'none', userSelect: 'none'
+        });
+
+        let btnPointer = null;
+        btn.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (btnPointer !== null) return;
+            btnPointer = e.pointerId;
+            btn.setPointerCapture(e.pointerId);
+            btn.style.background = 'rgba(255, 255, 255, 0.25)';
+            setVirtualKey(keyName, true);
+        });
+
+        const releaseBtn = (e) => {
+            if (e.pointerId !== btnPointer) return;
+            btnPointer = null;
+            btn.style.background = 'rgba(0, 0, 0, 0.55)';
+            setVirtualKey(keyName, false);
+        };
+        btn.addEventListener('pointerup', releaseBtn);
+        btn.addEventListener('pointercancel', releaseBtn);
+
+        return btn;
+    }
+
+    // C (Menu/Extra), X (Cancel / Slow SOUL), Z (Confirm / Attack)
+    const btnC = createActionButton('C', 'c', 46, '#00ff21');
+    const btnX = createActionButton('X', 'x', 54, '#00ffff');
+    const btnZ = createActionButton('Z', 'z', 64, '#ffff00');
+
+    btnContainer.appendChild(btnC);
+    btnContainer.appendChild(btnX);
+    btnContainer.appendChild(btnZ);
+    document.body.appendChild(btnContainer);
+})();
