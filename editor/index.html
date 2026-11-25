@@ -68,6 +68,10 @@ canvas{background:#000;border:1px solid var(--line);border-radius:4px;max-width:
 .sw{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;margin-right:6px;border:1px solid #fff4}
 table{border-collapse:collapse;width:100%}td,th{border:1px solid var(--line);padding:6px 8px;text-align:left;font-size:13px}
 code{background:var(--bg);padding:1px 5px;border-radius:4px}
+.row.snd{flex-wrap:wrap;align-items:center;gap:6px}
+.sndname{flex:1 1 200px;min-width:0;overflow-wrap:anywhere}
+.row.snd select{flex:1 1 180px;min-width:0}
+.row.snd audio{height:32px;max-width:100%}
 </style>
 </head>
 <body>
@@ -85,11 +89,12 @@ code{background:var(--bg);padding:1px 5px;border-radius:4px}
   <label id="autoWrap" class="hint" style="margin:0;display:none;cursor:pointer"><input type="checkbox" id="autoSave"> auto-save</label>
   <button class="btn pri" id="bSave" hidden>Save to folder</button>
   <button class="btn" id="bCopy">Copy INI</button>
-  <button class="btn pri" id="bZip" title="MOD.zip with encounter.ini + ENEMY/ + ATTACKS/ ready to drop into your project">Download ZIP</button>
+  <button class="btn pri" id="bZip" title="MOD.zip with encounter.ini + ENEMY/ + ATTACKS/ + AUDIO/ ready to drop into your project">Download ZIP</button>
   <button class="btn" id="bDownload">Download encounter.ini</button>
   <input type="file" id="fIni" accept=".ini,.txt" hidden>
   <input type="file" id="fMod" webkitdirectory multiple hidden>
   <input type="file" id="fImg" accept="image/gif,image/png,image/jpeg,image/webp" multiple hidden>
+  <input type="file" id="fAudio" accept=".wav,.mp3,.ogg,.m4a,audio/*" multiple hidden>
 </header>
 <div id="app">
   <nav id="nav"></nav>
@@ -134,11 +139,12 @@ const has=v=>v!==undefined&&v!==null&&String(v).trim()!=='';
 let assets = new Map(); // key -> {url,file,path}
 const imgCache = new Map();
 const IMG_RE=/\.(gif|png|jpe?g|webp)$/i;
+const AUDIO_RE=/\.(wav|mp3|ogg|m4a)$/i;
 let baseEntries=[], importedEntries=[]; // base = loaded from a folder, imported = added in this tool (imported wins)
 const norm=p=>p.replace(/\\/g,'/').replace(/^\.\//,'').toLowerCase();
 function resolveAsset(path,kind){
   if(!path||!assets.size) return null;
-  const n=norm(path), sub=kind==='enemy'?'enemy/':'attacks/';
+  const n=norm(path), sub=kind==='enemy'?'enemy/':kind==='audio'?'audio/':'attacks/';
   return assets.get(n)||assets.get(sub+n)||assets.get(n.split('/').pop())||null;
 }
 function getImg(path,kind){
@@ -155,7 +161,7 @@ function loadModFiles(files){
     const stripped=parts.length>1?parts.slice(1).join('/'):parts[0];
     const b=norm(parts[parts.length-1]);
     if(b==='encounter.ini'||b==='encounter.txt'){if(!ini||/^mod\//i.test(stripped))ini=f;continue}
-    if(IMG_RE.test(b))entries.push({file:f,path:stripped});
+    if(IMG_RE.test(b)||AUDIO_RE.test(b))entries.push({file:f,path:stripped});
   }
   setAssetEntries(entries);
   if(ini&&confirm('Found encounter.ini in this folder. Import it into the editor? (replaces current work)')){
@@ -301,6 +307,8 @@ function analyze(){
   }
   S.metas.forEach(m=>{lenCheck(`Attack "${m.name}" dialogue`,m.dialogue);if(has(m.name)&&!used.has(m.name)&&![...used].some(u=>u.toLowerCase()===m.name.toLowerCase())) add('info',`Attack settings "${m.name}" are never used in an attack list.`)});
   S.acts.forEach(a=>lenCheck(`ACT ${a.name} text`,a.text));
+  if(mod) audioRefs().forEach(([label,v])=>{if(!resolveAsset(v,'audio'))add('err',`${label}: file "${v}" not found in mod folder.`)});
+  ['musicvolume','sfxvolume'].forEach(k=>{const v=S.audio[k];if(has(v)&&!(+v>=0&&+v<=1))add('warn',`${k} should be a number from 0 to 1.`)});
   if(has(S.battle.victoryText)&&!/restart/i.test(S.battle.victoryText)) add('info','victoryText should mention "(Z to restart)".');
   if(has(S.battle.gameOverText)&&!/retry|restart/i.test(S.battle.gameOverText)) add('info','gameOverText should mention "(Z to retry)".');
   return P;
@@ -324,8 +332,60 @@ function turnsEditor(path){
    +`<div class="grid" style="margin-top:8px">${fld('loop (blank = last)',path+'.loop',{ph:'last'})}</div>`;
 }
 
+/* ============================ AUDIO TAB ============================ */
+// Keys match the sound names in GAME/script.js
+const SOUND_GROUPS=[
+  ['Menus',[['menu_move','Move cursor'],['menu_select','Confirm'],['menu_back','Cancel'],['menu_denied','Not allowed'],['text','Dialogue typing']]],
+  ['Fight bar',[['attack','Hit'],['attack_critical','Perfect hit'],['attack_miss','Miss'],['enemy_hit','Enemy takes damage']]],
+  ['Commands',[['magic','Magic'],['heal','Heal'],['item','Item'],['act','ACT'],['spare','Spare'],['defend','Defend']]],
+  ['Enemy turn',[['attack_start','Enemy turn begins'],['warning','Red #FF0000 warning'],['graze','Graze'],['hurt','Party member hurt'],['down','Party member down']]],
+  ['Battle events',[['phase','New boss phase'],['victory','Victory'],['gameover','Game over']]]
+];
+const audioAssets=()=>[...new Set(assets.values())].filter(a=>/^audio\//i.test(a.path)).sort((x,y)=>x.path.localeCompare(y.path));
+const isSilent=v=>['none','off','false'].includes(String(v).trim().toLowerCase());
+function audioRefs(){
+  const r=[];
+  Object.entries(S.audio||{}).forEach(([k,v])=>{if(!/volume$/i.test(k))r.push([`[AUDIO] ${k}`,v])});
+  S.phases.forEach(p=>r.push([`Phase ${p.num} music`,p.music]));
+  S.metas.forEach(m=>r.push([`Attack "${m.name}" sound`,m.sound]));
+  return r.filter(([,v])=>has(v)&&!isSilent(v));
+}
+let previewAudio=null;
+function previewSound(path){
+  const a=resolveAsset(path,'audio');
+  const same=previewAudio&&!previewAudio.paused&&a&&previewAudio.src===a.url;
+  if(previewAudio){previewAudio.pause();previewAudio=null}
+  if(same)return; // second press stops it
+  if(!a){toast('File not loaded: '+path);return}
+  previewAudio=new Audio(a.url);
+  previewAudio.volume=Math.max(0,Math.min(1,has(S.audio.sfxvolume)?+S.audio.sfxvolume||0:0.7));
+  previewAudio.play().catch(()=>toast('This browser can\'t play '+a.path));
+}
+function soundRow(label,key,path,blankLabel){
+  const v=String(get(path)??''),found=has(v)&&!isSilent(v)?resolveAsset(v,'audio'):null;
+  const files=audioAssets();
+  let opts=`<option value="">${blankLabel}</option><option value="none" ${isSilent(v)&&has(v)?'selected':''}>Silent</option>`;
+  opts+=files.map(a=>`<option value="${esc(a.path)}" ${found===a?'selected':''}>${esc(a.path)}</option>`).join('');
+  if(has(v)&&!isSilent(v)&&!files.includes(found)) opts+=`<option value="${esc(v)}" selected>${esc(v)} (not loaded)</option>`;
+  return `<div class="row snd"><span class="sndname">${esc(label)}${key?` <code>${key}</code>`:''}</span><select data-p="${path}">${opts}</select>
+<button class="btn sm" data-act="playSound" data-path="${path}" title="Play / stop" ${found?'':'disabled'}>▶</button>
+<button class="btn sm" data-act="uploadSound" data-path="${path}">Upload…</button></div>`;
+}
+function tAudio(){
+  const files=audioAssets(),used=new Set(audioRefs().map(([,v])=>resolveAsset(v,'audio')));
+  return `<h2>Audio</h2><p class="sub">Upload sounds into <code>MOD/AUDIO/</code> and choose where they play. They're included in <b>Download ZIP</b>, and written into an open folder.</p>
+<div class="drops"><div class="drop" data-folder="AUDIO"><b>Audio files → AUDIO/</b>Drop WAV / MP3 / OGG / M4A here<br><button class="btn sm" style="margin-top:8px" data-act="uploadSound" data-path="">Choose files…</button></div></div>
+<div class="card"><h4>Uploaded files</h4>${files.map(a=>`<div class="row snd"><span class="sndname">${esc(a.path)} <span class="hint">${(a.file.size/1024).toFixed(1)} KB</span> ${used.has(a)?'':'<span class="tag un">unused</span>'}</span><audio controls preload="none" src="${a.url}"></audio>${a.imported?`<button class="btn sm del" data-act="removeAsset" data-path="${esc(a.path)}">Remove</button>`:''}</div>`).join('')||'<p class="hint">No audio files yet.</p>'}</div>
+<div class="card"><h4>Music and volume</h4>${soundRow('Battle music','music','audio.music','Base game sound')}
+<div class="grid" style="margin-top:8px">${fld('musicVolume (0–1)','audio.musicvolume',{type:'number',ph:'0.45'})}${fld('sfxVolume (0–1)','audio.sfxvolume',{type:'number',ph:'0.7'})}</div>
+<div class="hint">"Base game sound" uses the file in GAME/ASSETS, and is silent if there isn't one.</div></div>
+${SOUND_GROUPS.map(([title,list])=>`<div class="card"><h4>${title}</h4>${list.map(([k,l])=>soundRow(l,k,'audio.'+k,'Base game sound')).join('')}</div>`).join('')}
+<div class="card"><h4>Phase music</h4>${S.phases.map((p,i)=>soundRow('Phase '+p.num,'',`phases.${i}.music`,'Keep current track')).join('')||'<p class="hint">Add phases on the Phases tab.</p>'}</div>
+<div class="card"><h4>Attack sounds</h4>${S.metas.map((m,i)=>soundRow(m.name||'(unnamed)','',`metas.${i}.sound`,'No extra sound')).join('')||'<p class="hint">Add attack settings on the Attacks tab.</p>'}</div>`;
+}
+
 /* ============================ TABS ============================ */
-const TABS=[['general','General'],['party','Party'],['enemies','Enemies'],['acts','ACTs'],['phases','Phases'],['attacks','Attacks'],['assets','Assets'],['help','Reference']];
+const TABS=[['general','General'],['party','Party'],['enemies','Enemies'],['acts','ACTs'],['phases','Phases'],['attacks','Attacks'],['audio','Audio'],['assets','Assets'],['help','Reference']];
 
 function tGeneral(){return `<h2>General</h2><p class="sub">Fallback arena size and win/lose messages. Leave blank for defaults.</p>
 <div class="card"><h4>Arena (fallback)</h4><div class="grid">${fld('w','arena.w',{type:'number',ph:'180'})}${fld('h','arena.h',{type:'number',ph:'150'})}</div>
@@ -406,7 +466,7 @@ function tHelp(){return `<h2>Reference</h2><p class="sub">Quick facts from the R
 <div class="card"><h4>Phase triggers</h4><code>hp_below:50%</code> <code>hp_below:120</code> <code>mercy_above:60</code> <code>turn:4</code></div>
 <div class="card"><h4>Gotchas</h4><div class="hint">No quotes, no inline comments. Text made of only digits becomes a number. Auto-load on GitHub Pages is case-sensitive: use <code>ENEMY</code> and <code>ATTACKS</code> folders exactly. ACTs are global. Turn gaps fall back to built-in bullets.</div></div>`}
 
-const RENDER={general:tGeneral,party:tParty,enemies:tEnemies,acts:tActs,phases:tPhases,attacks:tAttacks,assets:tAssets,help:tHelp};
+const RENDER={general:tGeneral,party:tParty,enemies:tEnemies,acts:tActs,phases:tPhases,attacks:tAttacks,audio:tAudio,assets:tAssets,help:tHelp};
 
 /* ============================ RENDER / UPDATE ============================ */
 function renderNav(){document.getElementById('nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-tab="${k}">${l}</button>`).join('')}
@@ -444,7 +504,7 @@ main.addEventListener('input',e=>{
 });
 main.addEventListener('change',e=>{
   const p=e.target.dataset&&e.target.dataset.p; if(!p)return;
-  if(/\.(name|num|ownAttacks)$/.test(p)||/ownAttacks/.test(p)){renderMain()}
+  if(/\.(name|num|ownAttacks)$/.test(p)||/ownAttacks/.test(p)||(tab==='audio'&&e.target.tagName==='SELECT')){renderMain()}
 });
 main.addEventListener('click',e=>{
   const b=e.target.closest('[data-act]');if(!b)return;
@@ -459,6 +519,8 @@ main.addEventListener('click',e=>{
   else if(act==='importPick'){pendingFolder=b.dataset.folder;pendingSprite=false;$('fImg').click();return}
   else if(act==='importSprite'){pendingFolder='ENEMY';pendingSprite=true;$('fImg').click();return}
   else if(act==='removeAsset'){removeImported(b.dataset.path)}
+  else if(act==='playSound'){previewSound(get(path));return}
+  else if(act==='uploadSound'){pendingSound=path;$('fAudio').click();return}
   else if(act==='useAttack'){
     const t=S.attacks.turns,last=t.reduce((m,x,i)=>has(x)?i:m,-1);
     if(last<0)t[0]=b.dataset.name;else t.splice(last+1,0,b.dataset.name);
@@ -667,7 +729,7 @@ async function openDir(h){
     for await(const [name,e] of d.entries()){
       if(name.startsWith('.')||name==='node_modules')continue;
       if(e.kind==='directory')await walk(e,pre+name+'/');
-      else if(/\.(gif|png|jpe?g|webp)$/i.test(name))entries.push({file:await e.getFile(),path:pre+name});
+      else if(IMG_RE.test(name)||AUDIO_RE.test(name))entries.push({file:await e.getFile(),path:pre+name});
     }
   }
   setSave('Reading folder…');
@@ -715,7 +777,7 @@ window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCa
 if(FSA)idb.get('last').then(h=>{if(h)$('bReopen').hidden=false}).catch(()=>{});
 
 /* ============================ ASSET IMPORT + ZIP EXPORT ============================ */
-let pendingFolder='ENEMY', pendingSprite=false, toastT=null;
+let pendingFolder='ENEMY', pendingSprite=false, pendingSound='', toastT=null;
 function toast(msg){const t=$('toast');t.textContent=msg;t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',4500)}
 function rebuildAssets(){
   assets.forEach(a=>URL.revokeObjectURL(a.url));assets=new Map();imgCache.clear();
@@ -726,7 +788,7 @@ function rebuildAssets(){
     assets.set(norm(path),e);
     const b=norm(path.split('/').pop());if(!assets.has(b))assets.set(b,e);
   }
-  $('modStatus').textContent=byPath.size?`assets: ${byPath.size} images`:'';
+  $('modStatus').textContent=byPath.size?`assets: ${byPath.size} files`:'';
   try{idb.put('imports',importedEntries.map(e=>({path:e.path,file:e.file}))).catch(()=>{})}catch(_){}
 }
 const safeName=n=>n.replace(/[^A-Za-z0-9._-]+/g,'_');
@@ -739,17 +801,17 @@ async function writeAssetToDir(path,file){
 async function importAssets(files,folder){
   const added=[],skipped=[];let wrote=0,failed=0;
   for(const f of files){
-    if(!IMG_RE.test(f.name)){skipped.push(f.name);continue}
+    if(!(folder==='AUDIO'?AUDIO_RE:IMG_RE).test(f.name)){skipped.push(f.name);continue}
     const path=folder+'/'+safeName(f.name);
     importedEntries=importedEntries.filter(e=>norm(e.path)!==norm(path));
     importedEntries.push({file:f,path});added.push(path);
     if(dirHandle){try{await writeAssetToDir(path,f);wrote++}catch(_){failed++}}
   }
   if(added.length)rebuildAssets();
-  let m=added.length?`Imported ${added.length} file${added.length>1?'s':''} into ${folder}/`:'No images imported';
+  let m=added.length?`Imported ${added.length} file${added.length>1?'s':''} into ${folder}/`:'No files imported';
   if(dirHandle&&wrote)m+=` and wrote ${wrote} to the folder`;
   if(failed)m+=` (${failed} couldn't be written to the folder)`;
-  if(skipped.length)m+=`. Skipped non-image: ${skipped.join(', ')}`;
+  if(skipped.length)m+=`. Skipped (wrong file type for ${folder}/): ${skipped.join(', ')}`;
   toast(m);
   return added;
 }
@@ -781,7 +843,7 @@ function makeZip(files){ // stored (uncompressed) zip: GIF/PNG are already compr
 async function buildZip(){
   const files=[{path:'MOD/encounter.ini',data:new TextEncoder().encode(emit())}],seen=new Set();let skipped=0;
   for(const a of new Set(assets.values())){
-    const p=a.path.replace(/\\/g,'/'),m=/^(enemy|attacks|bg)\//i.exec(p);
+    const p=a.path.replace(/\\/g,'/'),m=/^(enemy|attacks|bg|audio)\//i.exec(p);
     if(!m){skipped++;continue}
     const path='MOD/'+m[1].toUpperCase()+p.slice(m[1].length);
     if(seen.has(path.toLowerCase()))continue;seen.add(path.toLowerCase());
@@ -794,7 +856,7 @@ async function downloadZip(){
     const {blob,count,skipped}=await buildZip();
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='MOD.zip';a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-    toast(`MOD.zip: encounter.ini + ${count} asset${count===1?'':'s'}. Unzip it into your project root.`+(skipped?` (${skipped} file${skipped>1?'s':''} outside ENEMY/ and ATTACKS/ left out)`:''));
+    toast(`MOD.zip: encounter.ini + ${count} asset${count===1?'':'s'}. Unzip it into your project root.`+(skipped?` (${skipped} file${skipped>1?'s':''} outside ENEMY/, ATTACKS/, BG/ and AUDIO/ left out)`:''));
   }catch(e){toast('ZIP failed: '+e.message)}
 }
 function isAssetUsed(a){
@@ -813,6 +875,12 @@ function tAssets(){
 ${list.length?`<div class="agrid">${list.map(a=>`<div class="acard"><img src="${a.url}" alt="" onload="this.nextElementSibling.firstChild.textContent=this.naturalWidth+'×'+this.naturalHeight+' · '"><div class="hint" style="margin:0"><span></span>${(a.file.size/1024).toFixed(1)} KB</div><div class="nm">${esc(a.path)}</div><div>${isAssetUsed(a)?'':'<span class="tag un">unused</span> '}${a.imported?'<span class="tag im">imported</span> ':''}${a.imported?`<button class="btn sm del" data-act="removeAsset" data-path="${esc(a.path)}">Remove</button>`:''}</div></div>`).join('')}</div>`:'<p class="hint">No assets yet. Import some above, or load/open a mod folder.</p>'}`;
 }
 $('bZip').onclick=downloadZip;
+$('fAudio').onchange=async e=>{
+  const fl=[...e.target.files];e.target.value='';
+  const added=await importAssets(fl,'AUDIO');
+  if(pendingSound&&added.length)set(pendingSound,added[0]); // uploaded from a sound row: assign it
+  pendingSound='';renderMain();update();
+};
 $('fImg').onchange=async e=>{
   const fl=[...e.target.files];e.target.value='';
   const added=await importAssets(fl,pendingFolder);

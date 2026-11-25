@@ -825,7 +825,7 @@ Extra per-section keys:
 - `[ATTACK:name]` `sound = AUDIO/laser.wav` plays when that attack begins.
 - `[ATTACK:name]` `warn = off` disables the red warning for that attack.
 
-Press **M** to mute or unmute. Browsers only allow sound after the first key press, click or tap. The fight editor keeps these settings but does not preview or zip audio files, so copy `MOD/AUDIO/` yourself.
+Press **M** to mute or unmute. Browsers only allow sound after the first key press, click or tap. The fight editor's **Audio** tab uploads and previews files, assigns them to sounds, phases and attacks, and includes `MOD/AUDIO/` in **Download ZIP**.
 
 ---
 
