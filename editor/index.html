@@ -98,7 +98,7 @@ const PARTY_DEF = {
 };
 const F = {
   str:()=>'',
-  enemy:()=>({name:'New Enemy',hp:'100',def:'0',x:'470',y:'80',scale:'2',sprite:'',frameW:'',frameH:'',fps:'',acts:'Check, Flatter',flavor:['* An enemy draws near!'],anims:[]}),
+  enemy:()=>({name:'New Enemy',hp:'100',def:'0',x:'470',y:'80',scale:'2',sprite:'',frameW:'',frameH:'',fps:'',acts:'Check, Flatter',canTire:true,flavor:['* An enemy draws near!'],anims:[]}),
   anim:()=>({name:'idle',frames:'0',ticks:'8',loop:true}),
   act:()=>({name:'New',mercy:'50',tired:false,text:''}),
   phase:()=>({num:'1',trigger:'',dialogue:'',boss_anim:'',flavor:[],ownAttacks:false,attacks:{turns:[''],loop:''}}),
@@ -181,7 +181,7 @@ function parseIni(text){
     }
     if((sec==='enemy'||sec==='phase')&&kl.startsWith('flavor')){cur.flavor.push(v);continue}
     if(sec==='enemy'&&kl==='acts'){cur.acts=v;continue}
-    if((sec==='anim'&&kl==='loop')||(sec==='act'&&kl==='tired')){cur[k]=v!=='false';continue}
+    if((sec==='anim'&&kl==='loop')||(sec==='act'&&kl==='tired')||(sec==='enemy'&&k==='canTire')){cur[k]=v!=='false';continue}
     cur[k]=v;
   }
   s.enemies.forEach(e=>delete e._f);
@@ -203,6 +203,7 @@ function emit(){
     sec('ENEMY');
     ['name','hp','def','x','y','scale','sprite','frameW','frameH','fps'].forEach(k=>kv(k,e[k]));
     kv('acts',e.acts);
+    if(e.canTire===false)L.push('canTire = false');
     e.flavor.filter(has).forEach(f=>kv('flavor',f));
     for(const a of e.anims){ if(!has(a.name))continue; sec('ENEMY_ANIM:'+clean(a.name)); kv('frames',a.frames);kv('ticks',a.ticks); if(a.loop===false)L.push('loop = false') }
   }
@@ -246,6 +247,10 @@ function analyze(){
       }}
     }
     e.flavor.forEach(f=>lenCheck(`${n} flavor`,f));
+    if(e.canTire===false){
+      poolOf(e.acts).forEach(a=>{const d=S.acts.find(x=>x.name.toLowerCase()===a.toLowerCase());if(d&&d.tired)add('warn',`${n}: ACT "${a}" has tired = true, but this enemy can't become TIRED.`)});
+      add('info',`${n}: can't become TIRED, so Ralsei's Pacify won't work on it (use mercy or damage).`);
+    }
     poolOf(e.acts).forEach(a=>{ if(a.toLowerCase()!=='check'&&!S.acts.some(x=>x.name.toLowerCase()===a.toLowerCase())) add('info',`${n}: ACT "${a}" has no definition (will give +50 mercy). Check gives nothing.`)});
   });
   const nums=S.phases.map(p=>+p.num);
@@ -327,7 +332,8 @@ ${fld('name',p+'.name',{cls:'w2'})}${fld('hp',p+'.hp',{type:'number'})}${fld('de
 ${fld('x',p+'.x',{type:'number'})}${fld('y',p+'.y',{type:'number'})}${fld('scale',p+'.scale',{type:'number'})}
 ${fld('sprite (ENEMY/…)',p+'.sprite',{cls:'w2',ph:'ENEMY/boss_sheet.png'})}${fld('fps',p+'.fps',{type:'number',ph:'8'})}
 ${fld('frameW',p+'.frameW',{type:'number'})}${fld('frameH',p+'.frameH',{type:'number'})}
-${fld('acts (comma separated)',p+'.acts',{cls:'wall'})}</div>
+${fld('acts (comma separated)',p+'.acts',{cls:'wall'})}
+<label class="chk wall" title="Off = low HP and tired-ACTs never make this enemy TIRED, so Pacify can't spare it"><input type="checkbox" data-p="${p}.canTire" data-t="check" ${e.canTire!==false?'checked':''}> Can become TIRED</label></div>
 <div data-info="${esc(e.sprite)}|enemy" class="info-box"></div></div>
 <div class="card"><h4>Flavor text</h4><div class="hint">First line shows at the start of the fight, then a random one each turn.</div>${listEditor(p+'.flavor','Add line','Line ','* Something happens.')}</div>
 <div class="card"><h4>Animations</h4><div class="hint">frames: <code>3</code>, <code>0,1,2,1</code>, <code>4-7</code> or <code>0-3,5</code> (0-based). Put <code>idle</code> to override the default loop.</div>
