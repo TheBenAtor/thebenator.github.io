@@ -1,4 +1,4 @@
-# Battle Engine — Mod & Fight Creation Guide.
+# Battle Engine — Mod & Fight Creation Guide
 
 A canvas-based, turn-based battle engine in the style of Deltarune. A fight is built from **one text file** (`encounter.ini`) plus **image/GIF assets**. You don't need to touch `GAME/script.js` to make a fight.
 
