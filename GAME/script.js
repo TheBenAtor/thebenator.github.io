@@ -479,50 +479,22 @@ function drawBackground() {
 // Each sound is picked in this order:
 //   1. the mod's file from the [AUDIO] section of its INI
 //   2. the base game file GAME/ASSETS/<sound name>.wav, .ogg or .mp3
-//   3. the built-in synthesized version
+// With neither, that sound is silent.
 const BASE_AUDIO_EXTENSIONS = ['wav', 'ogg', 'mp3'];
 
-// Each tone: [start s, length s, start Hz, end Hz, wave, volume]
-const SFX_SYNTH = {
-    menu_move:    [[0, .045, 880, 880, 'square', .22]],
-    menu_select:  [[0, .05, 660, 660, 'square', .25], [.05, .08, 990, 990, 'square', .25]],
-    menu_back:    [[0, .05, 520, 520, 'square', .22], [.05, .07, 350, 350, 'square', .22]],
-    menu_denied:  [[0, .07, 160, 160, 'square', .3], [.09, .1, 130, 130, 'square', .3]],
-    text:         [[0, .025, 440, 440, 'square', .1]],
-    attack:       [[0, .12, 900, 180, 'saw', .35], [0, .09, 0, 0, 'noise', .25]],
-    attack_critical: [[0, .12, 1200, 250, 'saw', .35], [0, .1, 0, 0, 'noise', .25], [.08, .22, 1568, 2093, 'square', .22]],
-    attack_miss:  [[0, .14, 300, 120, 'triangle', .3]],
-    enemy_hit:    [[0, .14, 220, 60, 'square', .3], [0, .1, 0, 0, 'noise', .3]],
-    magic:        [[0, .35, 250, 1400, 'saw', .22], [.05, .3, 500, 1800, 'triangle', .25]],
-    heal:         [[0, .1, 523, 523, 'triangle', .4], [.08, .1, 659, 659, 'triangle', .4], [.16, .22, 1047, 1047, 'triangle', .4]],
-    item:         [[0, .08, 392, 392, 'square', .22], [.08, .16, 784, 784, 'square', .22]],
-    act:          [[0, .07, 587, 587, 'triangle', .35], [.07, .12, 880, 880, 'triangle', .35]],
-    spare:        [[0, .3, 700, 1760, 'triangle', .35], [.1, .3, 1047, 2637, 'triangle', .2]],
-    defend:       [[0, .18, 200, 400, 'square', .25]],
-    hurt:         [[0, .22, 260, 70, 'square', .4], [0, .15, 0, 0, 'noise', .35]],
-    down:         [[0, .5, 330, 55, 'saw', .35]],
-    graze:        [[0, .04, 1800, 2200, 'triangle', .18]],
-    warning:      [[0, .09, 1245, 1245, 'square', .35], [.13, .09, 1245, 1245, 'square', .35]],
-    attack_start: [[0, .16, 130, 390, 'saw', .25]],
-    phase:        [[0, .6, 90, 360, 'saw', .35], [0, .5, 0, 0, 'noise', .15]],
-    victory:      [[0, .14, 523, 523, 'square', .25], [.14, .14, 659, 659, 'square', .25], [.28, .14, 784, 784, 'square', .25], [.42, .5, 1047, 1047, 'square', .25]],
-    gameover:     [[0, .35, 392, 392, 'triangle', .45], [.35, .35, 311, 311, 'triangle', .45], [.7, .9, 196, 185, 'triangle', .45]]
-};
-
-const SYNTH_RATE = 22050;
-const WAVES = {
-    square:   t => (t % 1 < 0.5 ? 1 : -1) * 0.6,
-    saw:      t => ((t % 1) * 2 - 1) * 0.7,
-    triangle: t => 1 - 4 * Math.abs((t % 1) - 0.5),
-    noise:    () => Math.random() * 2 - 1
-};
+const SOUND_NAMES = [
+    'menu_move', 'menu_select', 'menu_back', 'menu_denied', 'text',
+    'attack', 'attack_critical', 'attack_miss', 'enemy_hit',
+    'magic', 'heal', 'item', 'act', 'spare', 'defend',
+    'attack_start', 'warning', 'graze', 'hurt', 'down',
+    'phase', 'victory', 'gameover'
+];
 
 const audioPrefs = { muted: false };
 try { audioPrefs.muted = localStorage.getItem('battleMuted') === '1'; } catch (_) {}
 
 let audioCtx = null, masterGain = null, musicGain = null, sfxGain = null;
 const audioCache = new Map(); // mod path -> Promise<AudioBuffer|null>
-const synthCache = new Map(); // sound name -> AudioBuffer
 const sfxOverrides = new Map(); // sound name -> AudioBuffer | 'none'
 const baseCache = new Map(); // sound name -> Promise<AudioBuffer|null>
 const baseSfx = new Map(); // sound name -> AudioBuffer from GAME/ASSETS
@@ -561,52 +533,6 @@ function toggleMute() {
     if (masterGain) masterGain.gain.value = audioPrefs.muted ? 0 : 1;
     try { localStorage.setItem('battleMuted', audioPrefs.muted ? '1' : '0'); } catch (_) {}
     muteNoticeFrames = 90;
-}
-
-function renderTones(tones) {
-    const length = Math.max(...tones.map(t => t[0] + t[1]));
-    const buffer = audioCtx.createBuffer(1, Math.ceil(length * SYNTH_RATE), SYNTH_RATE);
-    const out = buffer.getChannelData(0);
-    for (const [start, dur, f0, f1, wave, vol] of tones) {
-        const first = Math.floor(start * SYNTH_RATE), count = Math.floor(dur * SYNTH_RATE);
-        let phase = 0;
-        for (let i = 0; i < count && first + i < out.length; i++) {
-            const k = i / count;
-            phase += (f0 + (f1 - f0) * k) / SYNTH_RATE;
-            const envelope = Math.min(1, i / 60) * Math.min(1, (1 - k) * 3);
-            out[first + i] += WAVES[wave](phase) * vol * envelope;
-        }
-    }
-    return buffer;
-}
-
-// Original 8-bar loop used when the INI has no music file
-function builtInMusicTones() {
-    const hz = n => 440 * Math.pow(2, (n - 69) / 12);
-    const beat = 60 / 140, tones = [];
-    const roots = [45, 45, 41, 43, 45, 45, 41, 40];
-    const lead = [
-        [69, 0, 72, 76, 0, 74, 72, 0], [69, 0, 72, 76, 79, 0, 76, 0],
-        [77, 0, 76, 72, 0, 69, 72, 0], [74, 0, 71, 74, 79, 0, 74, 0],
-        [81, 0, 79, 76, 0, 74, 76, 0], [72, 74, 76, 0, 69, 0, 72, 0],
-        [77, 0, 81, 77, 0, 76, 72, 0], [76, 0, 71, 0, 68, 0, 71, 0]
-    ];
-    roots.forEach((root, bar) => {
-        for (let step = 0; step < 8; step++) {
-            const t = (bar * 4 + step / 2) * beat;
-            const bass = hz(root + (step % 2 ? 12 : 0));
-            tones.push([t, beat * 0.42, bass, bass, 'triangle', 0.4]);
-            if (lead[bar][step]) {
-                const f = hz(lead[bar][step]);
-                tones.push([t, beat * 0.45, f, f, 'square', 0.12]);
-            }
-            if (step % 2 === 0) tones.push([t, 0.09, 150, 40, 'triangle', 0.5]);
-            else tones.push([t, 0.04, 0, 0, 'noise', 0.08]);
-        }
-    });
-    // silent tail marker keeps the loop exactly 8 bars long
-    tones.push([32 * beat - 0.001, 0.001, 0, 0, 'triangle', 0]);
-    return tones;
 }
 
 function loadModAudio(path) {
@@ -650,13 +576,6 @@ function loadBaseAudio(name) {
     return baseCache.get(name);
 }
 
-function getSynth(name) {
-    if (!synthCache.has(name)) {
-        synthCache.set(name, renderTones(name === 'music' ? builtInMusicTones() : SFX_SYNTH[name]));
-    }
-    return synthCache.get(name);
-}
-
 function playBuffer(buffer) {
     const src = audioCtx.createBufferSource();
     src.buffer = buffer;
@@ -669,7 +588,7 @@ function playSfx(name) {
     if (!audioCtx || audioCtx.state !== 'running') return;
     const override = sfxOverrides.get(name);
     if (override === 'none') return;
-    const buffer = override || baseSfx.get(name) || (SFX_SYNTH[name] && getSynth(name));
+    const buffer = override || baseSfx.get(name);
     if (buffer) playBuffer(buffer);
 }
 
@@ -696,17 +615,17 @@ function stopMusic() {
 // path: a file in MOD/AUDIO/, empty for the base game music, or "none" for silence
 async function playMusic(path, restart = false) {
     if (!getAudioContext()) return;
-    const key = path ? String(path) : 'builtin';
+    const key = path ? String(path) : 'base';
     if (!restart && key === musicKey) return;
     stopMusic();
     musicKey = key;
     const token = musicToken;
     if (isNone(key)) return;
-    let buffer = key === 'builtin' ? null : await loadModAudio(key);
+    let buffer = key === 'base' ? null : await loadModAudio(key);
     if (token !== musicToken) return; // another track was requested while loading
     if (!buffer) buffer = await loadBaseAudio('music');
     if (token !== musicToken) return;
-    if (!buffer) buffer = getSynth('music');
+    if (!buffer) return;
     musicSource = audioCtx.createBufferSource();
     musicSource.buffer = buffer;
     musicSource.loop = true;
@@ -724,7 +643,7 @@ function setupBattleAudio(mod, music) {
 
     sfxOverrides.clear();
     const epoch = battleEpoch;
-    Object.keys(SFX_SYNTH).forEach(name => {
+    SOUND_NAMES.forEach(name => {
         loadBaseAudio(name);
         const value = cfg[name];
         if (value === undefined || value === '') return;

@@ -790,7 +790,8 @@ Each sound is picked in this order:
 
 1. **Mod file:** listed in the mod's `[AUDIO]` section, stored in `MOD/AUDIO/`.
 2. **Base game file:** `GAME/ASSETS/<key>.wav`, `.ogg` or `.mp3`, named after a key in the table below (`menu_move.wav`, `warning.ogg`, `music.mp3`). Names are lowercase, and no INI changes are needed.
-3. **Built-in sound:** synthesized by the engine, so the game works with no audio files.
+
+If neither file exists, that sound is silent.
 
 To change sounds in a mod, put them in `MOD/AUDIO/` and list them in `[AUDIO]`. MP3 and WAV work in all current browsers. A file name without a folder is looked up in `AUDIO/`.
 
