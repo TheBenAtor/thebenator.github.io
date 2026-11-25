@@ -11,7 +11,7 @@ const FONT_FAMILY = '"Determination", monospace';
 const ASSET_BASE = 'GAME/ASSETS/';
 const DEFAULT_BG_PATH = ASSET_BASE + 'background.gif';
 const MOD_BASE = 'MOD/';
-const MOD_SUBDIRS = { enemy: 'ENEMY/', attack: 'ATTACKS/', bg: 'BG/' };
+const MOD_SUBDIRS = { enemy: 'ENEMY/', attack: 'ATTACKS/', bg: 'BG/', audio: 'AUDIO/' };
 
 const STATES = {
     ACTION_SELECT:  'ACTION_SELECT',
@@ -62,6 +62,8 @@ function normalizeModPath(p) {
 function registerModFileList(fileList) {
     modFiles.clear();
     assetCache.clear();
+    audioCache.clear();
+    stopMusic();
     let iniFile = null;
 
     for (const file of fileList) {
@@ -472,6 +474,217 @@ function drawBackground() {
 }
 
 // ============================================================================
+// AUDIO: MUSIC, SOUND EFFECTS & ATTACK WARNINGS
+// ============================================================================
+// Each sound is picked in this order:
+//   1. the mod's file from the [AUDIO] section of its INI
+//   2. the base game file GAME/ASSETS/<sound name>.wav, .ogg or .mp3
+// With neither, that sound is silent.
+const BASE_AUDIO_EXTENSIONS = ['wav', 'ogg', 'mp3'];
+
+const SOUND_NAMES = [
+    'menu_move', 'menu_select', 'menu_back', 'menu_denied', 'text',
+    'attack', 'attack_critical', 'attack_miss', 'enemy_hit',
+    'magic', 'heal', 'item', 'act', 'spare', 'defend',
+    'attack_start', 'warning', 'graze', 'hurt', 'down',
+    'phase', 'victory', 'gameover'
+];
+
+const audioPrefs = { muted: false };
+try { audioPrefs.muted = localStorage.getItem('battleMuted') === '1'; } catch (_) {}
+
+let audioCtx = null, masterGain = null, musicGain = null, sfxGain = null;
+const audioCache = new Map(); // mod path -> Promise<AudioBuffer|null>
+const sfxOverrides = new Map(); // sound name -> AudioBuffer | 'none'
+const baseCache = new Map(); // sound name -> Promise<AudioBuffer|null>
+const baseSfx = new Map(); // sound name -> AudioBuffer from GAME/ASSETS
+let musicSource = null, musicKey = null, musicToken = 0;
+let muteNoticeFrames = 0;
+
+function getAudioContext() {
+    if (audioCtx) return audioCtx;
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    audioCtx = new Ctor();
+    masterGain = audioCtx.createGain();
+    musicGain = audioCtx.createGain();
+    sfxGain = audioCtx.createGain();
+    masterGain.gain.value = audioPrefs.muted ? 0 : 1;
+    musicGain.connect(masterGain);
+    sfxGain.connect(masterGain);
+    masterGain.connect(audioCtx.destination);
+    return audioCtx;
+}
+
+// Browsers keep audio locked until the first key press, click or tap.
+function unlockAudio() {
+    const ac = getAudioContext();
+    if (ac && ac.state !== 'running' && !document.hidden) ac.resume().catch(() => {});
+}
+['keydown', 'pointerdown', 'pointerup', 'touchend'].forEach(type =>
+    window.addEventListener(type, e => { if (e.isTrusted) unlockAudio(); }, true));
+document.addEventListener('visibilitychange', () => {
+    if (!audioCtx) return;
+    (document.hidden ? audioCtx.suspend() : audioCtx.resume()).catch(() => {});
+});
+
+function toggleMute() {
+    audioPrefs.muted = !audioPrefs.muted;
+    if (masterGain) masterGain.gain.value = audioPrefs.muted ? 0 : 1;
+    try { localStorage.setItem('battleMuted', audioPrefs.muted ? '1' : '0'); } catch (_) {}
+    muteNoticeFrames = 90;
+}
+
+function loadModAudio(path) {
+    const key = normalizeModPath(path);
+    if (!audioCache.has(key)) {
+        audioCache.set(key, (async () => {
+            try {
+                const bytes = await fetchModBuffer(path, 'audio');
+                return await decodeAudio(bytes);
+            } catch (err) {
+                console.warn('Could not load audio:', path, (err && err.message) || err);
+                return null;
+            }
+        })());
+    }
+    return audioCache.get(key);
+}
+
+function decodeAudio(bytes) {
+    return new Promise((res, rej) => audioCtx.decodeAudioData(bytes, res, rej));
+}
+
+function loadBaseAudio(name) {
+    if (!baseCache.has(name)) {
+        baseCache.set(name, (async () => {
+            for (const ext of BASE_AUDIO_EXTENSIONS) {
+                const url = `${ASSET_BASE}${name}.${ext}`;
+                try {
+                    const res = await fetch(url);
+                    if (!res.ok) continue;
+                    const buffer = await decodeAudio(await res.arrayBuffer());
+                    baseSfx.set(name, buffer);
+                    return buffer;
+                } catch (err) {
+                    console.warn('Could not load base audio:', url, (err && err.message) || err);
+                }
+            }
+            return null;
+        })());
+    }
+    return baseCache.get(name);
+}
+
+function playBuffer(buffer) {
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(sfxGain);
+    src.start();
+}
+
+function playSfx(name) {
+    // Skipped while locked, otherwise queued sounds would all burst out on unlock
+    if (!audioCtx || audioCtx.state !== 'running') return;
+    const override = sfxOverrides.get(name);
+    if (override === 'none') return;
+    const buffer = override || baseSfx.get(name);
+    if (buffer) playBuffer(buffer);
+}
+
+// One-off sound given by file path (per-attack "sound = ..." setting)
+async function playFileSfx(path) {
+    if (!getAudioContext() || isNone(path)) return;
+    const epoch = battleEpoch;
+    const buffer = await loadModAudio(String(path));
+    if (buffer && epoch === battleEpoch && audioCtx.state === 'running') playBuffer(buffer);
+}
+
+const isNone = v => ['none', 'off', 'false'].includes(String(v).toLowerCase());
+
+function stopMusic() {
+    musicToken++;
+    musicKey = null;
+    if (musicSource) {
+        musicSource.stop();
+        musicSource.disconnect();
+        musicSource = null;
+    }
+}
+
+// path: a file in MOD/AUDIO/, empty for the base game music, or "none" for silence
+async function playMusic(path, restart = false) {
+    if (!getAudioContext()) return;
+    const key = path ? String(path) : 'base';
+    if (!restart && key === musicKey) return;
+    stopMusic();
+    musicKey = key;
+    const token = musicToken;
+    if (isNone(key)) return;
+    let buffer = key === 'base' ? null : await loadModAudio(key);
+    if (token !== musicToken) return; // another track was requested while loading
+    if (!buffer) buffer = await loadBaseAudio('music');
+    if (token !== musicToken) return;
+    if (!buffer) return;
+    musicSource = audioCtx.createBufferSource();
+    musicSource.buffer = buffer;
+    musicSource.loop = true;
+    musicSource.connect(musicGain);
+    musicSource.start();
+}
+
+// Reads [AUDIO] for the current mod and preloads its files
+function setupBattleAudio(mod, music) {
+    if (!getAudioContext()) return;
+    const cfg = (mod && mod.audio) || {};
+    const volume = (v, fallback) => Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : fallback;
+    musicGain.gain.value = volume(cfg.musicvolume, 0.45);
+    sfxGain.gain.value = volume(cfg.sfxvolume, 0.7);
+
+    sfxOverrides.clear();
+    const epoch = battleEpoch;
+    SOUND_NAMES.forEach(name => {
+        loadBaseAudio(name);
+        const value = cfg[name];
+        if (value === undefined || value === '') return;
+        if (isNone(value)) { sfxOverrides.set(name, 'none'); return; }
+        loadModAudio(String(value)).then(buffer => {
+            if (buffer && epoch === battleEpoch) sfxOverrides.set(name, buffer);
+        });
+    });
+    if (mod) {
+        mod.phases.forEach(p => { if (p.music && !isNone(p.music)) loadModAudio(String(p.music)); });
+        Object.values(mod.attackMeta).forEach(m => { if (m.sound && !isNone(m.sound)) loadModAudio(String(m.sound)); });
+    }
+    playMusic(music, true);
+}
+
+// --- Red (#FF0000) warning pixels -------------------------------------------
+function frameHasWarning(frame) {
+    if (frame.hasWarning === undefined) {
+        const { width, height } = frame.canvas;
+        const data = frame.canvas.getContext('2d').getImageData(0, 0, width, height).data;
+        frame.hasWarning = false;
+        for (let i = 0; i < data.length; i += 4) {
+            if (data[i] === 255 && data[i + 1] === 0 && data[i + 2] === 0 && data[i + 3] >= 128) {
+                frame.hasWarning = true;
+                break;
+            }
+        }
+    }
+    return frame.hasWarning;
+}
+
+// Plays when red appears; red held across several frames only warns once
+function updateAttackWarning() {
+    const a = activeAttack;
+    if (!a || !a.asset || !a.warn) return;
+    const red = frameHasWarning(a.asset.frames[a.frameIdx % a.asset.frames.length]);
+    if (red && !a.redShowing) playSfx('warning');
+    a.redShowing = red;
+}
+
+// ============================================================================
 // INI / TXT ENCOUNTER PARSER
 // ============================================================================
 function parseScalar(val) {
@@ -487,6 +700,7 @@ function parseEncounterIni(rawText) {
         party: {},
         enemies: [],
         acts: {},
+        audio: {},
         phases: [],
         attacks: { turns: {}, loop: 'last', maxTurn: 0 },
         attackMeta: {},
@@ -507,7 +721,10 @@ function parseEncounterIni(rawText) {
             const header = line.slice(1, -1).trim();
             const upper = header.toUpperCase();
 
-            if (upper === 'ARENA') {
+            if (upper === 'AUDIO' || upper === 'SOUND') {
+                sectionType = 'AUDIO';
+                currentObj = cfg.audio;
+            } else if (upper === 'ARENA') {
                 sectionType = 'ARENA';
                 currentObj = cfg.arena;
             } else if (upper === 'BATTLE' || upper === 'BACKGROUND' || upper === 'BG') {
@@ -590,6 +807,11 @@ function parseEncounterIni(rawText) {
                     currentObj.maxTurn = Math.max(currentObj.maxTurn, turnNum);
                 }
             }
+            continue;
+        }
+
+        if (sectionType === 'AUDIO') {
+            currentObj[keyLower] = parseScalar(val);
             continue;
         }
 
@@ -1305,6 +1527,9 @@ function initBattle() {
     pendingDialogue = null;
     activeAttack = null;
 
+    const startPhase = getCurrentPhase();
+    setupBattleAudio(mod, (startPhase && startPhase.music) || (mod && mod.audio.music));
+
     flavorText = getCurrentFlavorPool()[0] || '* Enemies blocked the way!';
     currentState = STATES.ACTION_SELECT;
     currentPartyIndex = 0;
@@ -1390,6 +1615,7 @@ window.addEventListener('keydown', (e) => {
     keys[key] = true;
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(key)) e.preventDefault();
     if (e.repeat) return;
+    if (key === 'm') { toggleMute(); return; }
 
     const confirm = key === 'z' || key === 'enter';
     const cancel  = key === 'x' || key === 'shift';
@@ -1397,16 +1623,20 @@ window.addEventListener('keydown', (e) => {
     switch (currentState) {
         case STATES.ACTION_SELECT: {
             const len = currentActions().length;
+            const before = selectedAction;
             if (key === 'arrowright' || key === 'd') selectedAction = (selectedAction + 1) % len;
             if (key === 'arrowleft'  || key === 'a') selectedAction = (selectedAction - 1 + len) % len;
+            if (selectedAction !== before) playSfx('menu_move');
             if (confirm) confirmActionSelect();
             if (cancel)  cancelPreviousCommand();
             break;
         }
         case STATES.SUB_MENU: {
             const len = menuOptions().length;
+            const before = menu.index;
             if (key === 'arrowdown' || key === 's') menu.index = Math.min(menu.index + 1, len - 1);
             if (key === 'arrowup'   || key === 'w') menu.index = Math.max(menu.index - 1, 0);
+            if (menu.index !== before) playSfx('menu_move');
             if (confirm) confirmSubMenu();
             if (cancel)  backOutOfSubMenu();
             break;
@@ -1419,6 +1649,7 @@ window.addEventListener('keydown', (e) => {
                 if (cancel) {
                     dialogueCharCount = pendingDialogue.text.length;
                 } else if (confirm) {
+                    playSfx('menu_select');
                     if (dialogueCharCount < pendingDialogue.text.length) {
                         dialogueCharCount = pendingDialogue.text.length;
                     } else {
@@ -1431,7 +1662,7 @@ window.addEventListener('keydown', (e) => {
             break;
         case STATES.VICTORY:
         case STATES.GAME_OVER:
-            if (confirm) initBattle();
+            if (confirm) { playSfx('menu_select'); initBattle(); }
             break;
     }
 });
@@ -1444,13 +1675,19 @@ function confirmActionSelect() {
     const action = currentActions()[selectedAction];
     menu = { action, stage: null, index: 0, target: null, spell: null, item: null };
 
+    if (action === 'ITEM' && !items.some(i => i.count > 0)) {
+        playSfx('menu_denied');
+        menu = null;
+        return;
+    }
+    playSfx('menu_select');
+
     if (action === 'DEFEND') {
         menu = null;
         queueMemberAction({ member: actor, action: 'DEFEND', phase: PHASE.DEFEND });
         return;
     }
     if (action === 'ITEM') {
-        if (!items.some(i => i.count > 0)) { menu = null; return; }
         menu.stage = 'ITEM_LIST';
     } else if (action === 'MAGIC') {
         menu.stage = 'MAGIC_LIST';
@@ -1490,7 +1727,8 @@ function menuOptions() {
 
 function confirmSubMenu() {
     const opt = menuOptions()[menu.index];
-    if (!opt || opt.enabled === false) return;
+    if (!opt || opt.enabled === false) { playSfx('menu_denied'); return; }
+    playSfx('menu_select');
     const actor = party[currentPartyIndex];
 
     switch (menu.stage) {
@@ -1537,6 +1775,7 @@ function queueSpell(actor, spell, target) {
 }
 
 function backOutOfSubMenu() {
+    playSfx('menu_back');
     switch (menu.stage) {
         case 'ACT_LIST': menu.stage = 'TARGET'; menu.index = 0; return;
         case 'PARTY':    menu.stage = menu.action === 'ITEM' ? 'ITEM_LIST' : 'MAGIC_LIST'; menu.index = 0; return;
@@ -1574,6 +1813,7 @@ function advanceToNextPartyMember() {
 
 function cancelPreviousCommand() {
     if (queuedCommands.length === 0) return;
+    playSfx('menu_back');
     const cmd = queuedCommands.pop();
     addTP(-cmd.tpDelta);
     if (cmd.action === 'ITEM') cmd.item.count++;
@@ -1626,10 +1866,12 @@ function runCommand(cmd) {
     switch (cmd.action) {
         case 'DEFEND':
             m.defending = true;
+            playSfx('defend');
             return true;
 
         case 'ACT': {
             if (t.spared) return false;
+            playSfx('act');
             const actDef = loadedModConfig && loadedModConfig.acts[cmd.actType.toLowerCase()];
             if (actDef) {
                 if (actDef.mercy) addMercy(t, actDef.mercy);
@@ -1643,14 +1885,17 @@ function runCommand(cmd) {
 
         case 'ITEM':
             healMember(t, cmd.item.heal);
+            playSfx('item');
             return true;
 
         case 'SPARE':
             if (t.spared) return false;
             if (t.mercy >= 100) {
                 t.spared = true;
+                playSfx('spare');
             } else {
                 addMercy(t, 10);
+                playSfx('act');
             }
             return true;
 
@@ -1666,6 +1911,7 @@ function runSpell(cmd) {
 
     switch (s.kind) {
         case 'damage': {
+            playSfx('magic');
             // Scales with Susie's magic stat (default magic=10 gives original 2.5x multiplier)
             const mult = 2.5 + Math.max(0, (m.magic || 0) - 10) * 0.05;
             spawnRudeBusterWave(m, t, hitTarget => {
@@ -1675,14 +1921,17 @@ function runSpell(cmd) {
             break;
         }
         case 'pacify':
+            playSfx(t.tired ? 'spare' : 'menu_denied');
             if (t.tired) t.spared = true;
             break;
         case 'heal':
             // Scales with Ralsei's magic stat (default magic=20 heals 40 HP)
             healMember(t, 20 + (m.magic || 0));
+            playSfx('heal');
             break;
         case 'mercy':
             addMercy(t, 25);
+            playSfx('magic');
             break;
     }
     return true;
@@ -1705,6 +1954,10 @@ function addTP(amount) {
 
 function checkVictory() {
     if (!enemies.every(e => e.spared)) return false;
+    if (currentState !== STATES.VICTORY) {
+        stopMusic();
+        playSfx('victory');
+    }
     party.forEach(m => {
         if (m.downed) { m.hp = Math.ceil(m.maxHp * 0.12); m.downed = false; }
         m.pending = null;
@@ -1755,6 +2008,7 @@ function resolveTrack(t, dist) {
 
     if (dist <= 4) {
         t.hitResult = 'PERFECT';
+        playSfx('attack_critical');
         playOneShot(t.member, 'attack');
         t.color = '#ffff00';
         addTP(6);
@@ -1762,11 +2016,13 @@ function resolveTrack(t, dist) {
         applyDamage(t.member, target, 1.5);
     } else if (dist <= 75) {
         t.hitResult = 'GOOD';
+        playSfx('attack');
         playOneShot(t.member, 'attack');
         addTP(Math.floor(2 + (1 - dist / 75) * 2));
         applyDamage(t.member, target, 1.0 - dist / 100);
     } else {
         t.hitResult = 'MISS';
+        playSfx('attack_miss');
         playOneShot(t.member, 'attack');
         if (target.def < 0) {
             applyDamage(t.member, target, 0.2);
@@ -1809,6 +2065,7 @@ function spawnPerfectStars(x, y) {
 function applyDamage(attacker, enemy, multiplier) {
     const finalDamage = Math.max(1, Math.floor(attacker.power * multiplier - enemy.def));
     enemy.hp = Math.max(0, enemy.hp - finalDamage);
+    playSfx('enemy_hit');
 
     if (enemy.hp <= 0) {
         enemy.spared = true;
@@ -1894,6 +2151,8 @@ async function prepareEnemyTurnImpl() {
     const newPhase = evaluatePhaseTriggers();
     const boss = activeEnemies()[0] || enemies[0];
     if (newPhase) {
+        playSfx('phase');
+        if (newPhase.music) playMusic(newPhase.music);
         if (newPhase.boss_anim && boss) playEnemyAnim(boss, newPhase.boss_anim);
         if (newPhase.background || newPhase.bg) {
             setBattleBackground(newPhase.background || newPhase.bg, newPhase.bgFps || newPhase.backgroundFps);
@@ -1911,6 +2170,27 @@ async function prepareEnemyTurnImpl() {
         if (epoch !== battleEpoch) return; // battle was restarted / mod reloaded while loading
     }
 
+    // Advanced mode: a full-screen 640x480 GIF that is not tied to the battle box
+    const advanced = String(meta.mode || '').toLowerCase() === 'advanced';
+    let error = '';
+    if (advanced) {
+        const file = String(meta.file || atkName);
+        if (!asset) error = `${file} could not be loaded`;
+        else if (!/\.gif$/i.test(file)) error = `${file} is not a .gif`;
+        else if (asset.w !== V_WIDTH || asset.h !== V_HEIGHT) error = `${file} is ${asset.w}x${asset.h}, needs ${V_WIDTH}x${V_HEIGHT}`;
+        if (error) {
+            console.error(`Advanced attack "${atkName}": ${error}`);
+            asset = null; // the built-in bullets play instead
+        }
+    }
+    const warn = !isNone(meta.warn ?? true);
+    if (asset && warn) asset.frames.forEach(frameHasWarning); // scan before the turn to avoid stutter
+
+    const defaultW = (loadedModConfig && loadedModConfig.arena.w) || 180;
+    const defaultH = (loadedModConfig && loadedModConfig.arena.h) || 150;
+    const autoW = !advanced && asset ? asset.w : defaultW;
+    const autoH = !advanced && asset ? asset.h : defaultH;
+
     activeAttack = atkName ? {
         name: atkName,
         asset,
@@ -1918,8 +2198,14 @@ async function prepareEnemyTurnImpl() {
         duration: meta.duration ?? 480,
         fps: meta.fps || null,
         // Box auto-matches the attack GIF/image size. [ATTACK] boxW/boxH still work as optional overrides.
-        boxW: Math.max(48, Math.min(580, meta.boxW ?? (asset ? asset.w : (loadedModConfig ? loadedModConfig.arena.w : 180)))),
-        boxH: Math.max(48, Math.min(245, meta.boxH ?? (asset ? asset.h : (loadedModConfig ? loadedModConfig.arena.h : 150)))),
+        boxW: Math.max(48, Math.min(580, meta.boxW ?? autoW)),
+        boxH: Math.max(48, Math.min(245, meta.boxH ?? autoH)),
+        advanced: advanced && !error,
+        freeSoul: advanced && !error && String(meta.soul || '').toLowerCase() === 'screen',
+        error,
+        warn,
+        redShowing: false,
+        sound: meta.sound || '',
         bossAnim: meta.boss_anim || '',
         dialogue: meta.dialogue || ''
     } : null;
@@ -1962,7 +2248,10 @@ function startDialogueQueue(lines, speaker, onAllDone) {
 function updateEnemyDialogue() {
     if (!pendingDialogue) return;
     if (dialogueCharCount < pendingDialogue.text.length) {
+        const shown = Math.floor(dialogueCharCount);
         dialogueCharCount += 0.65;
+        const now = Math.floor(dialogueCharCount);
+        if (now !== shown && now % 3 === 0 && pendingDialogue.text[now - 1] !== ' ') playSfx('text');
     }
     // Smoothly lerp the bullet board to the upcoming attack's dimensions while the boss talks
     arena.w += (targetArena.w - arena.w) * 0.18;
@@ -1989,9 +2278,13 @@ function beginEnemyTurnBullets() {
     if (activeAttack) {
         activeAttack.frameIdx = 0;
         activeAttack.frameTimerMs = 0;
-        hitCanvas.width = Math.round(arena.w);
-        hitCanvas.height = Math.round(arena.h);
+        const area = attackArea();
+        hitCanvas.width = Math.round(area.w);
+        hitCanvas.height = Math.round(area.h);
     }
+    playSfx('attack_start');
+    if (activeAttack && activeAttack.sound) playFileSfx(activeAttack.sound);
+    updateAttackWarning(); // frame 1 may already be red
 
     const targets = consciousParty();
     activeEnemies().forEach(e => {
@@ -2010,13 +2303,19 @@ function beginEnemyTurnBullets() {
 // ============================================================================
 // ENEMY TURN & OFFSCREEN PIXEL COLLISION
 // ============================================================================
+// Screen rectangle the attack frame covers: the whole screen in advanced mode, else the box
+function attackArea() {
+    return activeAttack && activeAttack.advanced ? { x: 0, y: 0, w: V_WIDTH, h: V_HEIGHT } : arena;
+}
+
 function checkAttackPixels(frameCanvas) {
     hitCtx.imageSmoothingEnabled = false;
     hitCtx.clearRect(0, 0, hitCanvas.width, hitCanvas.height);
     hitCtx.drawImage(frameCanvas, 0, 0, hitCanvas.width, hitCanvas.height);
 
-    const relX = Math.round(soul.x - arena.x);
-    const relY = Math.round(soul.y - arena.y);
+    const area = attackArea();
+    const relX = Math.round(soul.x - area.x);
+    const relY = Math.round(soul.y - area.y);
     const grazeRadius = 22;
 
     const x0 = Math.max(0, relX - grazeRadius);
@@ -2063,8 +2362,9 @@ function updateEnemyTurn() {
     enemyTurnTimer--;
 
     const spd = (keys['x'] || keys['shift']) ? soul.speed / 2 : soul.speed;
-    const minX = arena.x + soul.radius + 4, maxX = arena.x + arena.w - soul.radius - 4;
-    const minY = arena.y + soul.radius + 4, maxY = arena.y + arena.h - soul.radius - 4;
+    const bounds = activeAttack && activeAttack.freeSoul ? attackArea() : arena;
+    const minX = bounds.x + soul.radius + 4, maxX = bounds.x + bounds.w - soul.radius - 4;
+    const minY = bounds.y + soul.radius + 4, maxY = bounds.y + bounds.h - soul.radius - 4;
     if (keys['arrowleft']  || keys['a']) soul.x = Math.max(minX, soul.x - spd);
     if (keys['arrowright'] || keys['d']) soul.x = Math.min(maxX, soul.x + spd);
     if (keys['arrowup']    || keys['w']) soul.y = Math.max(minY, soul.y - spd);
@@ -2083,6 +2383,7 @@ function updateEnemyTurn() {
         if (activeAttack.frameTimerMs >= frameDuration) {
             activeAttack.frameTimerMs -= frameDuration;
             activeAttack.frameIdx = (activeAttack.frameIdx + 1) % frames.length;
+            updateAttackWarning();
         }
 
         const res = checkAttackPixels(curFrame.canvas);
@@ -2127,6 +2428,7 @@ function updateEnemyTurn() {
         }
     }
 
+    if (grazing && !soulGrazing) playSfx('graze');
     soulGrazing = grazing;
     if (grazing) addTP(0.125);
 
@@ -2150,8 +2452,13 @@ function damageParty(preferred, baseDamage = 18) {
         victim.hp = -Math.ceil(victim.maxHp * 0.5);
         victim.downed = true;
         victim.defending = false;
+        playSfx('down');
+    } else {
+        playSfx('hurt');
     }
     if (consciousParty().length === 0) {
+        stopMusic();
+        playSfx('gameover');
         currentState = STATES.GAME_OVER;
         bullets = [];
         flavorText = (loadedModConfig && loadedModConfig.gameOverText)
@@ -2376,6 +2683,7 @@ function update() {
     updateParticles();
     updateAnimations();
     updateEffects();
+    if (muteNoticeFrames > 0) muteNoticeFrames--;
 
     if (delayed) {
         if (--delayed.frames <= 0) {
@@ -2631,11 +2939,17 @@ function drawStars() {
 }
 
 function drawBattleArena() {
+    // With a screen-wide soul there is no box to draw
+    if (currentState === STATES.ENEMY_TURN && activeAttack && activeAttack.freeSoul) {
+        drawAdvancedAttack();
+        drawSoul();
+        return;
+    }
     ctx.fillStyle = '#000000';
     ctx.fillRect(arena.x, arena.y, arena.w, arena.h);
 
     // Draw active GIF/image attack clipped inside the battle box
-    if (currentState === STATES.ENEMY_TURN && activeAttack && activeAttack.asset && activeAttack.asset.frames.length > 0) {
+    if (currentState === STATES.ENEMY_TURN && activeAttack && !activeAttack.advanced && activeAttack.asset && activeAttack.asset.frames.length > 0) {
         const frames = activeAttack.asset.frames;
         const fc = frames[activeAttack.frameIdx % frames.length].canvas;
         ctx.save();
@@ -2653,6 +2967,13 @@ function drawBattleArena() {
 
     if (currentState !== STATES.ENEMY_TURN) return;
 
+    if (activeAttack && activeAttack.advanced) drawAdvancedAttack();
+    if (activeAttack && activeAttack.error) {
+        ctx.fillStyle = '#ffff00';
+        ctx.font = `14px ${FONT_FAMILY}`;
+        ctx.fillText(`ADVANCED ATTACK ERROR: ${activeAttack.error}`, 20, 392);
+    }
+
     bullets.forEach(b => {
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
@@ -2660,6 +2981,16 @@ function drawBattleArena() {
         ctx.fill();
     });
 
+    drawSoul();
+}
+
+function drawAdvancedAttack() {
+    const frames = activeAttack.asset.frames;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(frames[activeAttack.frameIdx % frames.length].canvas, 0, 0, V_WIDTH, V_HEIGHT);
+}
+
+function drawSoul() {
     if (soulGrazing) {
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1;
@@ -2696,6 +3027,11 @@ function render() {
     }
     drawStars();
     drawEffects();
+    if (muteNoticeFrames > 0) {
+        ctx.fillStyle = '#ffff00';
+        ctx.font = `14px ${FONT_FAMILY}`;
+        ctx.fillText(audioPrefs.muted ? 'SOUND OFF (M)' : 'SOUND ON (M)', 270, 16);
+    }
 
     ctx.restore();
 }
