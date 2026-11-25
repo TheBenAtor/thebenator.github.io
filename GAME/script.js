@@ -524,7 +524,7 @@ function parseEncounterIni(rawText) {
                     name: 'Enemy', hp: 100, def: 0, x: 470, y: 80, scale: 2,
                     sprite: null, frameW: 0, frameH: 0, fps: 8,
                     anims: {}, flavor: ['* An enemy draws near!'], _defaultFlavor: true,
-                    acts: ['Check', 'Flatter']
+                    acts: ['Check', 'Flatter'], canTire: true
                 };
                 cfg.enemies.push(currentObj);
             } else if (upper.startsWith('ENEMY_ANIM:') || upper.startsWith('BOSS_ANIM:')) {
@@ -1633,7 +1633,7 @@ function runCommand(cmd) {
             const actDef = loadedModConfig && loadedModConfig.acts[cmd.actType.toLowerCase()];
             if (actDef) {
                 if (actDef.mercy) addMercy(t, actDef.mercy);
-                if (actDef.tired) t.tired = true;
+                if (actDef.tired && t.canTire !== false) t.tired = true;
                 if (actDef.text) flavorText = actDef.text;
             } else if (cmd.actType.toLowerCase() !== 'check') {
                 addMercy(t, 50);
@@ -1812,7 +1812,7 @@ function applyDamage(attacker, enemy, multiplier) {
 
     if (enemy.hp <= 0) {
         enemy.spared = true;
-    } else if (enemy.hp < enemy.maxHp * 0.5) {
+    } else if (enemy.canTire !== false && enemy.hp < enemy.maxHp * 0.5) {
         enemy.tired = true;
     }
 }
