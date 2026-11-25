@@ -786,7 +786,13 @@ What happens in this fight:
 
 ## Audio
 
-The game has built-in music and sound effects, so it works with **no audio files**. To use your own, put them in `MOD/AUDIO/` and list them in `[AUDIO]`. MP3 and WAV work in all current browsers. A file name without a folder is looked up in `AUDIO/`.
+Each sound is picked in this order:
+
+1. **Mod file:** listed in the mod's `[AUDIO]` section, stored in `MOD/AUDIO/`.
+2. **Base game file:** `GAME/ASSETS/<key>.wav`, `.ogg` or `.mp3`, named after a key in the table below (`menu_move.wav`, `warning.ogg`, `music.mp3`). Names are lowercase, and no INI changes are needed.
+3. **Built-in sound:** synthesized by the engine, so the game works with no audio files.
+
+To change sounds in a mod, put them in `MOD/AUDIO/` and list them in `[AUDIO]`. MP3 and WAV work in all current browsers. A file name without a folder is looked up in `AUDIO/`.
 
 ```ini
 [AUDIO]
@@ -797,7 +803,7 @@ warning = AUDIO/alert.wav
 text = none
 ```
 
-`music` and every sound below accept a file path or `none` (silent). Leave a line out to keep the built-in version.
+`music` and every sound below accept a file path or `none` (silent). Leave a line out to keep the base game sound.
 
 | Key | Plays when |
 |---|---|

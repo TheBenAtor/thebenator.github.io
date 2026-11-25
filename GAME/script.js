@@ -476,8 +476,11 @@ function drawBackground() {
 // ============================================================================
 // AUDIO: MUSIC, SOUND EFFECTS & ATTACK WARNINGS
 // ============================================================================
-// Every sound has a built-in synthesized version, so the game has audio with no files.
-// An [AUDIO] section in the INI replaces any of them with a file from MOD/AUDIO/.
+// Each sound is picked in this order:
+//   1. the mod's file from the [AUDIO] section of its INI
+//   2. the base game file GAME/ASSETS/<sound name>.wav, .ogg or .mp3
+//   3. the built-in synthesized version
+const BASE_AUDIO_EXTENSIONS = ['wav', 'ogg', 'mp3'];
 
 // Each tone: [start s, length s, start Hz, end Hz, wave, volume]
 const SFX_SYNTH = {
@@ -521,6 +524,8 @@ let audioCtx = null, masterGain = null, musicGain = null, sfxGain = null;
 const audioCache = new Map(); // mod path -> Promise<AudioBuffer|null>
 const synthCache = new Map(); // sound name -> AudioBuffer
 const sfxOverrides = new Map(); // sound name -> AudioBuffer | 'none'
+const baseCache = new Map(); // sound name -> Promise<AudioBuffer|null>
+const baseSfx = new Map(); // sound name -> AudioBuffer from GAME/ASSETS
 let musicSource = null, musicKey = null, musicToken = 0;
 let muteNoticeFrames = 0;
 
@@ -610,7 +615,7 @@ function loadModAudio(path) {
         audioCache.set(key, (async () => {
             try {
                 const bytes = await fetchModBuffer(path, 'audio');
-                return await new Promise((res, rej) => audioCtx.decodeAudioData(bytes, res, rej));
+                return await decodeAudio(bytes);
             } catch (err) {
                 console.warn('Could not load audio:', path, (err && err.message) || err);
                 return null;
@@ -618,6 +623,31 @@ function loadModAudio(path) {
         })());
     }
     return audioCache.get(key);
+}
+
+function decodeAudio(bytes) {
+    return new Promise((res, rej) => audioCtx.decodeAudioData(bytes, res, rej));
+}
+
+function loadBaseAudio(name) {
+    if (!baseCache.has(name)) {
+        baseCache.set(name, (async () => {
+            for (const ext of BASE_AUDIO_EXTENSIONS) {
+                const url = `${ASSET_BASE}${name}.${ext}`;
+                try {
+                    const res = await fetch(url);
+                    if (!res.ok) continue;
+                    const buffer = await decodeAudio(await res.arrayBuffer());
+                    baseSfx.set(name, buffer);
+                    return buffer;
+                } catch (err) {
+                    console.warn('Could not load base audio:', url, (err && err.message) || err);
+                }
+            }
+            return null;
+        })());
+    }
+    return baseCache.get(name);
 }
 
 function getSynth(name) {
@@ -639,7 +669,7 @@ function playSfx(name) {
     if (!audioCtx || audioCtx.state !== 'running') return;
     const override = sfxOverrides.get(name);
     if (override === 'none') return;
-    const buffer = override || (SFX_SYNTH[name] && getSynth(name));
+    const buffer = override || baseSfx.get(name) || (SFX_SYNTH[name] && getSynth(name));
     if (buffer) playBuffer(buffer);
 }
 
@@ -663,7 +693,7 @@ function stopMusic() {
     }
 }
 
-// path: a file in MOD/AUDIO/, empty for the built-in loop, or "none" for silence
+// path: a file in MOD/AUDIO/, empty for the base game music, or "none" for silence
 async function playMusic(path, restart = false) {
     if (!getAudioContext()) return;
     const key = path ? String(path) : 'builtin';
@@ -674,6 +704,8 @@ async function playMusic(path, restart = false) {
     if (isNone(key)) return;
     let buffer = key === 'builtin' ? null : await loadModAudio(key);
     if (token !== musicToken) return; // another track was requested while loading
+    if (!buffer) buffer = await loadBaseAudio('music');
+    if (token !== musicToken) return;
     if (!buffer) buffer = getSynth('music');
     musicSource = audioCtx.createBufferSource();
     musicSource.buffer = buffer;
@@ -693,6 +725,7 @@ function setupBattleAudio(mod, music) {
     sfxOverrides.clear();
     const epoch = battleEpoch;
     Object.keys(SFX_SYNTH).forEach(name => {
+        loadBaseAudio(name);
         const value = cfg[name];
         if (value === undefined || value === '') return;
         if (isNone(value)) { sfxOverrides.set(name, 'none'); return; }
