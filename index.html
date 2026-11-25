@@ -1,8 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-<head <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#000000">
-<link rel="apple-touch-icon" href="pwa/icons/apple-touch-icon.png">>
+<head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Battle</title>
@@ -14,7 +12,15 @@
     html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
     canvas { display: block; }
   </style>
+
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#000000">
+<link rel="apple-touch-icon" href="pwa/icons/apple-touch-icon.png">
+  
 </head>
+  <script>
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+</script>
 <body>
   <canvas id="gameCanvas"></canvas>
   <script src="GAME/script.js"></script>
