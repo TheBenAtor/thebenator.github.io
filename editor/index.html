@@ -41,6 +41,17 @@ h2{margin:0 0 4px;font-size:18px}
 input[type=text],input[type=number],textarea,select{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:6px 8px;width:100%}
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
 textarea{resize:vertical;min-height:54px}
+.drops{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.drop{border:2px dashed var(--line);border-radius:8px;padding:18px 12px;text-align:center;color:var(--dim)}
+.drop.over{border-color:var(--acc);color:var(--acc)}
+.drop b{display:block;color:var(--txt);margin-bottom:6px}
+.agrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+.acard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.acard img{width:100%;height:96px;object-fit:contain;background:#000;image-rendering:pixelated;border-radius:4px}
+.acard .nm{word-break:break-all;color:var(--txt)}
+.tag{display:inline-block;padding:0 6px;border-radius:99px;font-size:11px;border:1px solid var(--line);color:var(--dim)}
+.tag.un{border-color:var(--warn);color:var(--warn)}.tag.im{border-color:var(--info);color:var(--info)}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--acc);padding:8px 14px;border-radius:8px;z-index:20;display:none;max-width:90vw}
 .chk{display:flex;align-items:center;gap:6px;align-self:end;padding:6px 0}
 .row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
 .row .lbl{width:58px;flex:none;color:var(--dim);font-size:12px}
@@ -74,9 +85,11 @@ code{background:var(--bg);padding:1px 5px;border-radius:4px}
   <label id="autoWrap" class="hint" style="margin:0;display:none;cursor:pointer"><input type="checkbox" id="autoSave"> auto-save</label>
   <button class="btn pri" id="bSave" hidden>Save to folder</button>
   <button class="btn" id="bCopy">Copy INI</button>
+  <button class="btn pri" id="bZip" title="MOD.zip with encounter.ini + ENEMY/ + ATTACKS/ ready to drop into your project">Download ZIP</button>
   <button class="btn" id="bDownload">Download encounter.ini</button>
   <input type="file" id="fIni" accept=".ini,.txt" hidden>
   <input type="file" id="fMod" webkitdirectory multiple hidden>
+  <input type="file" id="fImg" accept="image/gif,image/png,image/jpeg,image/webp" multiple hidden>
 </header>
 <div id="app">
   <nav id="nav"></nav>
@@ -87,6 +100,7 @@ code{background:var(--bg);padding:1px 5px;border-radius:4px}
   </aside>
 </div>
 
+<div id="toast"></div>
 <script>
 'use strict';
 /* ============================ STATE ============================ */
@@ -119,6 +133,8 @@ const has=v=>v!==undefined&&v!==null&&String(v).trim()!=='';
 /* ============================ ASSETS ============================ */
 let assets = new Map(); // key -> {url,file,path}
 const imgCache = new Map();
+const IMG_RE=/\.(gif|png|jpe?g|webp)$/i;
+let baseEntries=[], importedEntries=[]; // base = loaded from a folder, imported = added in this tool (imported wins)
 const norm=p=>p.replace(/\\/g,'/').replace(/^\.\//,'').toLowerCase();
 function resolveAsset(path,kind){
   if(!path||!assets.size) return null;
@@ -132,19 +148,16 @@ function getImg(path,kind){
   return c.ok?c.img:null;
 }
 function loadModFiles(files){
-  assets.forEach(a=>URL.revokeObjectURL(a.url)); assets=new Map(); imgCache.clear();
   closeDir();
-  let ini=null;
+  let ini=null;const entries=[];
   for(const f of files){
     const rel=f.webkitRelativePath||f.name, parts=rel.split('/');
     const stripped=parts.length>1?parts.slice(1).join('/'):parts[0];
-    const url=URL.createObjectURL(f), e={url,file:f,path:stripped};
-    assets.set(norm(stripped),e);
-    const b=norm(parts[parts.length-1]); if(!assets.has(b)) assets.set(b,e);
-    if(b==='encounter.ini'||b==='encounter.txt') ini=f;
+    const b=norm(parts[parts.length-1]);
+    if(b==='encounter.ini'||b==='encounter.txt'){if(!ini||/^mod\//i.test(stripped))ini=f;continue}
+    if(IMG_RE.test(b))entries.push({file:f,path:stripped});
   }
-  const n=new Set([...assets.values()]).size;
-  document.getElementById('modStatus').textContent=`mod folder: ${n} files`;
+  setAssetEntries(entries);
   if(ini&&confirm('Found encounter.ini in this folder. Import it into the editor? (replaces current work)')){
     ini.text().then(t=>{S=parseIni(t);selEnemy=0;full()});
   } else full();
@@ -308,7 +321,7 @@ function turnsEditor(path){
 }
 
 /* ============================ TABS ============================ */
-const TABS=[['general','General'],['party','Party'],['enemies','Enemies'],['acts','ACTs'],['phases','Phases'],['attacks','Attacks'],['help','Reference']];
+const TABS=[['general','General'],['party','Party'],['enemies','Enemies'],['acts','ACTs'],['phases','Phases'],['attacks','Attacks'],['assets','Assets'],['help','Reference']];
 
 function tGeneral(){return `<h2>General</h2><p class="sub">Fallback arena size and win/lose messages. Leave blank for defaults.</p>
 <div class="card"><h4>Arena (fallback)</h4><div class="grid">${fld('w','arena.w',{type:'number',ph:'180'})}${fld('h','arena.h',{type:'number',ph:'150'})}</div>
@@ -334,6 +347,7 @@ ${fld('sprite (ENEMY/…)',p+'.sprite',{cls:'w2',ph:'ENEMY/boss_sheet.png'})}${f
 ${fld('frameW',p+'.frameW',{type:'number'})}${fld('frameH',p+'.frameH',{type:'number'})}
 ${fld('acts (comma separated)',p+'.acts',{cls:'wall'})}
 <label class="chk wall" title="Off = low HP and tired-ACTs never make this enemy TIRED, so Pacify can't spare it"><input type="checkbox" data-p="${p}.canTire" data-t="check" ${e.canTire!==false?'checked':''}> Can become TIRED</label></div>
+<div style="margin-top:8px"><button class="btn sm" data-act="importSprite">Import sprite…</button> <span class="hint">adds the image to ENEMY/ and fills in the sprite path</span></div>
 <div data-info="${esc(e.sprite)}|enemy" class="info-box"></div></div>
 <div class="card"><h4>Flavor text</h4><div class="hint">First line shows at the start of the fight, then a random one each turn.</div>${listEditor(p+'.flavor','Add line','Line ','* Something happens.')}</div>
 <div class="card"><h4>Animations</h4><div class="hint">frames: <code>3</code>, <code>0,1,2,1</code>, <code>4-7</code> or <code>0-3,5</code> (0-based). Put <code>idle</code> to override the default loop.</div>
@@ -367,7 +381,8 @@ function tAttacks(){
   const files=[...new Set([...assets.values()])].filter(a=>/\.(gif|png|jpg|jpeg)$/i.test(a.path)&&/attacks\//i.test(a.path)).map(a=>a.path);
   return `<h2>Attacks</h2><p class="sub">The global sequence, plus optional per-attack settings (damage, duration, dialogue…).</p>
 <div class="card"><h4>Global sequence [ATTACKS]</h4>${turnsEditor('attacks')}</div>
-${files.length?`<div class="card"><h4>Files in ATTACKS/</h4><div class="hint">${files.map(esc).join(' &nbsp;·&nbsp; ')}</div></div>`:''}
+<div class="card"><h4>Files in ATTACKS/ <span class="spacer"></span><button class="btn sm" data-act="importPick" data-folder="ATTACKS">Import attack files…</button></h4>
+${files.length?`<div class="hint">Click a file to add it as a new turn in the global sequence.</div><div class="chips">${files.map(f=>{const n=f.replace(/^attacks\//i,'');return `<span class="chip" data-act="useAttack" data-name="${esc(n)}">${esc(n)}</span>`}).join('')}</div>`:'<div class="hint">No attack files yet. Import GIFs or _stripN.png files, or drop them on the Assets tab.</div>'}</div>
 <div style="margin-bottom:12px"><button class="btn" data-act="push" data-path="metas" data-new="meta">+ Add attack settings</button> ${missing.map(n=>`<button class="btn sm" data-act="addMeta" data-name="${esc(n)}">+ ${esc(n)}</button>`).join(' ')}</div>
 ${S.metas.map((m,i)=>`<div class="card"><h4>${esc(m.name||'(unnamed)')} <span class="spacer"></span><button class="btn sm del" data-act="remove" data-path="metas" data-i="${i}">✕</button></h4><div class="grid">
 ${fld('name (as used in lists)',`metas.${i}.name`,{cls:'w2'})}${fld('file',`metas.${i}.file`,{cls:'w2',ph:'ATTACKS/'+(m.name||'x')+'.gif'})}
@@ -386,7 +401,7 @@ function tHelp(){return `<h2>Reference</h2><p class="sub">Quick facts from the R
 <div class="card"><h4>Phase triggers</h4><code>hp_below:50%</code> <code>hp_below:120</code> <code>mercy_above:60</code> <code>turn:4</code></div>
 <div class="card"><h4>Gotchas</h4><div class="hint">No quotes, no inline comments. Text made of only digits becomes a number. Auto-load on GitHub Pages is case-sensitive: use <code>ENEMY</code> and <code>ATTACKS</code> folders exactly. ACTs are global. Turn gaps fall back to built-in bullets.</div></div>`}
 
-const RENDER={general:tGeneral,party:tParty,enemies:tEnemies,acts:tActs,phases:tPhases,attacks:tAttacks,help:tHelp};
+const RENDER={general:tGeneral,party:tParty,enemies:tEnemies,acts:tActs,phases:tPhases,attacks:tAttacks,assets:tAssets,help:tHelp};
 
 /* ============================ RENDER / UPDATE ============================ */
 function renderNav(){document.getElementById('nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-tab="${k}">${l}</button>`).join('')}
@@ -436,6 +451,13 @@ main.addEventListener('click',e=>{
   else if(act==='removeEnemy'){if(!confirm('Delete this enemy?'))return;S.enemies.splice(selEnemy,1);selEnemy=0}
   else if(act==='addPhase'){const p=F.phase();const n=S.phases.reduce((m,x)=>Math.max(m,+x.num),0)+1;p.num=String(n);if(n>1)p.trigger='hp_below:50%';S.phases.push(p)}
   else if(act==='addMeta'){const m=F.meta();m.name=b.dataset.name;S.metas.push(m)}
+  else if(act==='importPick'){pendingFolder=b.dataset.folder;pendingSprite=false;$('fImg').click();return}
+  else if(act==='importSprite'){pendingFolder='ENEMY';pendingSprite=true;$('fImg').click();return}
+  else if(act==='removeAsset'){removeImported(b.dataset.path)}
+  else if(act==='useAttack'){
+    const t=S.attacks.turns,last=t.reduce((m,x,i)=>has(x)?i:m,-1);
+    if(last<0)t[0]=b.dataset.name;else t.splice(last+1,0,b.dataset.name);
+  }
   else if(act==='syncActs'){
     const names=new Set(S.acts.map(a=>a.name.toLowerCase()));
     S.enemies.forEach(en=>poolOf(en.acts).forEach(n=>{if(!names.has(n.toLowerCase())){names.add(n.toLowerCase());const a=F.act();a.name=n;if(n.toLowerCase()==='check')a.mercy='0';S.acts.push(a)}}));
@@ -626,13 +648,10 @@ async function ensurePerm(h){
 }
 async function findIni(d){for(const n of ['encounter.ini','encounter.txt']){try{return await d.getFileHandle(n)}catch(_){}}return null}
 function setAssetEntries(entries){
-  assets.forEach(a=>URL.revokeObjectURL(a.url));assets=new Map();imgCache.clear();
-  for(const {file,path} of entries){
-    const e={url:URL.createObjectURL(file),file,path};
-    assets.set(norm(path),e);
-    const b=norm(path.split('/').pop());if(!assets.has(b))assets.set(b,e);
-  }
-  $('modStatus').textContent=`mod folder: ${entries.length} images`;
+  // if the picked folder is the project root, keep only what's under MOD/ and make paths relative to it
+  const mod=entries.filter(e=>/^mod\//i.test(e.path));
+  baseEntries=mod.length?mod.map(e=>({file:e.file,path:e.path.slice(4)})):entries;
+  rebuildAssets();
 }
 async function openDir(h){
   if(!(await ensurePerm(h))){setSave('Permission denied',true);return}
@@ -689,6 +708,116 @@ $('bReopen').onclick=async()=>{try{const h=await idb.get('last');if(h)await open
 $('bSave').onclick=saveToFolder;
 window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();dirHandle?saveToFolder():$('bDownload').click()}});
 if(FSA)idb.get('last').then(h=>{if(h)$('bReopen').hidden=false}).catch(()=>{});
+
+/* ============================ ASSET IMPORT + ZIP EXPORT ============================ */
+let pendingFolder='ENEMY', pendingSprite=false, toastT=null;
+function toast(msg){const t=$('toast');t.textContent=msg;t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',4500)}
+function rebuildAssets(){
+  assets.forEach(a=>URL.revokeObjectURL(a.url));assets=new Map();imgCache.clear();
+  const byPath=new Map(),imp=new Set(importedEntries.map(e=>norm(e.path)));
+  for(const en of [...baseEntries,...importedEntries])byPath.set(norm(en.path),en);
+  for(const {file,path} of byPath.values()){
+    const e={url:URL.createObjectURL(file),file,path,imported:imp.has(norm(path))};
+    assets.set(norm(path),e);
+    const b=norm(path.split('/').pop());if(!assets.has(b))assets.set(b,e);
+  }
+  $('modStatus').textContent=byPath.size?`assets: ${byPath.size} images`:'';
+  try{idb.put('imports',importedEntries.map(e=>({path:e.path,file:e.file}))).catch(()=>{})}catch(_){}
+}
+const safeName=n=>n.replace(/[^A-Za-z0-9._-]+/g,'_');
+async function writeAssetToDir(path,file){
+  const parts=path.split('/');let d=dirHandle;
+  for(const seg of parts.slice(0,-1))d=await d.getDirectoryHandle(seg,{create:true});
+  const fh=await d.getFileHandle(parts[parts.length-1],{create:true});
+  const w=await fh.createWritable();await w.write(file);await w.close();
+}
+async function importAssets(files,folder){
+  const added=[],skipped=[];let wrote=0,failed=0;
+  for(const f of files){
+    if(!IMG_RE.test(f.name)){skipped.push(f.name);continue}
+    const path=folder+'/'+safeName(f.name);
+    importedEntries=importedEntries.filter(e=>norm(e.path)!==norm(path));
+    importedEntries.push({file:f,path});added.push(path);
+    if(dirHandle){try{await writeAssetToDir(path,f);wrote++}catch(_){failed++}}
+  }
+  if(added.length)rebuildAssets();
+  let m=added.length?`Imported ${added.length} file${added.length>1?'s':''} into ${folder}/`:'No images imported';
+  if(dirHandle&&wrote)m+=` and wrote ${wrote} to the folder`;
+  if(failed)m+=` (${failed} couldn't be written to the folder)`;
+  if(skipped.length)m+=`. Skipped non-image: ${skipped.join(', ')}`;
+  toast(m);
+  return added;
+}
+function removeImported(path){
+  importedEntries=importedEntries.filter(e=>norm(e.path)!==norm(path));
+  rebuildAssets();
+  toast(dirHandle?'Removed from the editor (the file in your folder was not deleted)':'Removed');
+}
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(u8){let c=0xFFFFFFFF;for(let i=0;i<u8.length;i++)c=CRC[(c^u8[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
+function makeZip(files){ // stored (uncompressed) zip: GIF/PNG are already compressed
+  const enc=new TextEncoder(),parts=[],central=[];let off=0;
+  const d=new Date(),dt=(((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())&0xFFFF,tm=((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1))&0xFFFF;
+  for(const f of files){
+    const name=enc.encode(f.path),crc=crc32(f.data),sz=f.data.length;
+    const lh=new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(8,0,true);lh.setUint16(10,tm,true);lh.setUint16(12,dt,true);lh.setUint32(14,crc,true);lh.setUint32(18,sz,true);lh.setUint32(22,sz,true);lh.setUint16(26,name.length,true);lh.setUint16(28,0,true);
+    parts.push(lh.buffer,name,f.data);
+    const ch=new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);ch.setUint16(10,0,true);ch.setUint16(12,tm,true);ch.setUint16(14,dt,true);ch.setUint32(16,crc,true);ch.setUint32(20,sz,true);ch.setUint32(24,sz,true);ch.setUint16(28,name.length,true);ch.setUint32(42,off,true);
+    central.push(ch.buffer,name);
+    off+=30+name.length+sz;
+  }
+  let cs=0;for(const c of central)cs+=c.byteLength;
+  const eo=new DataView(new ArrayBuffer(22));
+  eo.setUint32(0,0x06054b50,true);eo.setUint16(8,files.length,true);eo.setUint16(10,files.length,true);eo.setUint32(12,cs,true);eo.setUint32(16,off,true);
+  return new Blob([...parts,...central,eo.buffer],{type:'application/zip'});
+}
+async function buildZip(){
+  const files=[{path:'MOD/encounter.ini',data:new TextEncoder().encode(emit())}],seen=new Set();let skipped=0;
+  for(const a of new Set(assets.values())){
+    const p=a.path.replace(/\\/g,'/'),m=/^(enemy|attacks|bg)\//i.exec(p);
+    if(!m){skipped++;continue}
+    const path='MOD/'+m[1].toUpperCase()+p.slice(m[1].length);
+    if(seen.has(path.toLowerCase()))continue;seen.add(path.toLowerCase());
+    files.push({path,data:new Uint8Array(await a.file.arrayBuffer())});
+  }
+  return {blob:makeZip(files),count:files.length-1,skipped};
+}
+async function downloadZip(){
+  try{
+    const {blob,count,skipped}=await buildZip();
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='MOD.zip';a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    toast(`MOD.zip: encounter.ini + ${count} asset${count===1?'':'s'}. Unzip it into your project root.`+(skipped?` (${skipped} file${skipped>1?'s':''} outside ENEMY/ and ATTACKS/ left out)`:''));
+  }catch(e){toast('ZIP failed: '+e.message)}
+}
+function isAssetUsed(a){
+  const n=norm(a.path),base=n.split('/').pop(),refs=[];
+  S.enemies.forEach(e=>{if(has(e.sprite))refs.push(norm(e.sprite))});
+  S.metas.forEach(m=>{if(has(m.file))refs.push(norm(m.file))});
+  usedAttackNames().forEach(x=>{const m=S.metas.find(mm=>mm.name.toLowerCase()===x.toLowerCase());refs.push(norm((m&&m.file)||x))});
+  return refs.some(r=>r===n||r.split('/').pop()===base);
+}
+function tAssets(){
+  const list=[...new Set(assets.values())].filter(a=>/^(enemy|attacks|bg)\//i.test(a.path)).sort((x,y)=>x.path.localeCompare(y.path));
+  return `<h2>Assets</h2><p class="sub">Import images here and they're previewed, checked and bundled into <b>Download ZIP</b> (<code>MOD/ENEMY/</code> and <code>MOD/ATTACKS/</code>). With a folder open, imports are also written straight into it. Imports are remembered in this browser.</p>
+<div class="drops">
+<div class="drop" data-folder="ENEMY"><b>Enemy sprites → ENEMY/</b>Drop images here<br><button class="btn sm" style="margin-top:8px" data-act="importPick" data-folder="ENEMY">Choose files…</button></div>
+<div class="drop" data-folder="ATTACKS"><b>Attack files → ATTACKS/</b>Drop GIFs / _stripN.png here<br><button class="btn sm" style="margin-top:8px" data-act="importPick" data-folder="ATTACKS">Choose files…</button></div></div>
+${list.length?`<div class="agrid">${list.map(a=>`<div class="acard"><img src="${a.url}" alt="" onload="this.nextElementSibling.firstChild.textContent=this.naturalWidth+'×'+this.naturalHeight+' · '"><div class="hint" style="margin:0"><span></span>${(a.file.size/1024).toFixed(1)} KB</div><div class="nm">${esc(a.path)}</div><div>${isAssetUsed(a)?'':'<span class="tag un">unused</span> '}${a.imported?'<span class="tag im">imported</span> ':''}${a.imported?`<button class="btn sm del" data-act="removeAsset" data-path="${esc(a.path)}">Remove</button>`:''}</div></div>`).join('')}</div>`:'<p class="hint">No assets yet. Import some above, or load/open a mod folder.</p>'}`;
+}
+$('bZip').onclick=downloadZip;
+$('fImg').onchange=async e=>{
+  const fl=[...e.target.files];e.target.value='';
+  const added=await importAssets(fl,pendingFolder);
+  if(pendingSprite&&added.length&&S.enemies[selEnemy])S.enemies[selEnemy].sprite=added[0];
+  pendingSprite=false;renderMain();update();
+};
+main.addEventListener('dragover',e=>{const z=e.target.closest&&e.target.closest('.drop');if(z){e.preventDefault();z.classList.add('over')}});
+main.addEventListener('dragleave',e=>{const z=e.target.closest&&e.target.closest('.drop');if(z)z.classList.remove('over')});
+main.addEventListener('drop',async e=>{const z=e.target.closest&&e.target.closest('.drop');if(!z)return;e.preventDefault();e.stopPropagation();z.classList.remove('over');await importAssets([...e.dataTransfer.files],z.dataset.folder);renderMain();update()});
+try{idb.get('imports').then(a=>{if(Array.isArray(a)&&a.length){importedEntries=a.filter(x=>x&&x.file&&x.path);rebuildAssets();renderMain();update()}}).catch(()=>{})}catch(_){}
 
 full();
 requestAnimationFrame(loop);
