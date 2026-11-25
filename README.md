@@ -303,6 +303,7 @@ Both names are identical. **Repeat the section** to add several enemies. Each de
 | `sprite` | none | Path to a `.gif`, a sprite sheet, or a single image, relative to `MOD/` (a bare file name is looked up in `ENEMY/`) |
 | `frameW`, `frameH` | whole image | Frame size for sprite sheets (see [Enemy sprites](#7-making-enemy-sprites)) |
 | `fps` | `8` | Speed of the default idle loop for sheets |
+| `canTire` | `true` | `false` makes this enemy **unable to become TIRED**: low HP no longer tires it and ACTs with `tired = true` have no tiring effect. Ralsei's Pacify then can't spare it, so it must be spared with mercy or beaten |
 | `acts` | `Check, Flatter` | Comma-separated list shown in Kris's ACT menu |
 | `flavor` | `* An enemy draws near!` | Battle text lines. **Repeatable.** Any key starting with `flavor` works (`flavor1`, `flavor2`, …) |
 
@@ -360,7 +361,7 @@ Defines what an ACT does. The name is matched **case-insensitively** against the
 | Key | Default | Meaning |
 |---|---|---|
 | `mercy` | `50` | Mercy % added to the target. Use `0` for none. **Don't use negatives** |
-| `tired` | `false` | `true` makes the enemy TIRED (blue name, which enables Pacify) |
+| `tired` | `false` | `true` makes the enemy TIRED (blue name, which enables Pacify). Ignored by enemies with `canTire = false` |
 | `text` | empty | Text shown while the action plays |
 
 Details:
@@ -619,7 +620,7 @@ Damage is rounded down with a minimum of 1.
 ### Other rules
 
 - **TP** starts at 16 and caps at 100.
-- **TIRED:** an enemy below 50% HP becomes tired, or when an ACT with `tired = true` is used.
+- **TIRED:** an enemy below 50% HP becomes tired, or when an ACT with `tired = true` is used. An enemy with `canTire = false` never becomes tired.
 - **Mercy** caps at 100%. At 100% the name turns yellow, and SPARE ends that enemy's part in the fight.
 - **Downed allies:** a member at 0 HP is DOWN. They recover a little HP each round and stand back up when positive. Healing also revives. If all three are down, it's game over.
 - **Damage to the party:** `attack damage − member def` (minimum 1); DEFEND reduces it to 60%. Each enemy picks a random conscious target at the start of its attack, shown by a `TARGET` marker above that member.
