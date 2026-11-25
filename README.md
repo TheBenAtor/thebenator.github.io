@@ -27,6 +27,7 @@ The player controls **Kris, Susie and Ralsei**. Enemies attack by playing a **GI
 8. [Phases and dialogue](#8-phases-and-dialogue)
 9. [Combat rules cheat-sheet](#9-combat-rules-cheat-sheet)
 10. [Full example encounter](#10-full-example-encounter)
+    - [Audio](#audio)
 11. [Testing and debugging](#11-testing-and-debugging)
 12. [Troubleshooting](#12-troubleshooting)
 13. [Limits and what's hard-coded](#13-limits-and-whats-hard-coded)
@@ -484,6 +485,16 @@ Limits: the box is clamped to **48–580 wide** and **48–245 tall** (keep heig
 
 If you want to force a different box than the GIF, `[ATTACK:…]` still accepts optional `boxW` / `boxH`, but the GIF is then stretched to that size, so most mods should leave them out.
 
+### Red warning pixels
+
+Pure red `#FF0000` (exactly R 255, G 0, B 0) plays the **warning sound**. It never hurts, so use it to telegraph where an attack is about to land.
+
+- The sound plays when red **appears**. Red held over several frames warns once.
+- To warn again, show at least one frame with no red, then show red again.
+- Red can be anywhere in the frame; a single pixel is enough.
+- Any `#FF0000` in decoration also triggers it. Use another shade (such as `#FE0000`) for silent red, or set `warn = off` on the attack.
+- Turn off dithering and check your export tool keeps the exact color.
+
 ### Hit colors
 
 The soul's hitbox is a circle of radius 6 around the heart's center. The engine checks every pixel of the **current frame** under it.
@@ -498,6 +509,32 @@ The soul's hitbox is a circle of radius 6 around the heart's center. The engine 
 Recommended exact colors: `#FFFFFF`, `#00FFFF`, `#FF9900`.
 
 Pixels with alpha below 50% are ignored, so transparent GIFs work.
+
+### Advanced attack mode (full screen)
+
+Advanced attacks are drawn over the **whole 640×480 screen**, so they can animate anywhere, not only inside the battle box.
+
+```ini
+[ATTACK:beam]
+file = ATTACKS/beam.gif
+mode = advanced
+soul = box
+boxW = 180
+boxH = 150
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `mode` | normal | `advanced` turns this mode on |
+| `soul` | `box` | `box` keeps the soul in the battle box. `screen` hides the box and lets the soul move anywhere |
+| `boxW`, `boxH` | `[ARENA]` size, else 180×150 | Box size. It does not stretch the GIF |
+
+- The file **must be a `.gif` of exactly 640×480**. Otherwise an error is shown on screen and the built-in bullets play instead.
+- 1 GIF pixel = 1 game pixel, and hit colors work everywhere on the screen.
+- The GIF is drawn **on top of** the sprites and UI, so use a **transparent background**.
+- The box is centered on x 320, y 190. At 180×150 its top-left corner is x 230, y 115.
+- The soul starts at the center of the box (or of the screen with `soul = screen`, at x 320, y 240). Keep that spot clear on frame 1.
+- Large GIFs use about 1.2 MB of memory per frame, so aim for under 100 frames.
 
 ### Rules for clean results
 
@@ -747,6 +784,44 @@ What happens in this fight:
 
 ---
 
+## Audio
+
+The game has built-in music and sound effects, so it works with **no audio files**. To use your own, put them in `MOD/AUDIO/` and list them in `[AUDIO]`. MP3 and WAV work in all current browsers. A file name without a folder is looked up in `AUDIO/`.
+
+```ini
+[AUDIO]
+music = AUDIO/battle.mp3
+musicVolume = 0.45
+sfxVolume = 0.7
+warning = AUDIO/alert.wav
+text = none
+```
+
+`music` and every sound below accept a file path or `none` (silent). Leave a line out to keep the built-in version.
+
+| Key | Plays when |
+|---|---|
+| `menu_move`, `menu_select`, `menu_back`, `menu_denied` | Navigating menus |
+| `text` | Enemy dialogue is typing |
+| `attack`, `attack_critical`, `attack_miss` | FIGHT bar results |
+| `enemy_hit` | An enemy takes damage |
+| `magic`, `heal`, `item`, `act`, `spare`, `defend` | Party commands |
+| `attack_start` | An enemy turn begins |
+| `warning` | Red `#FF0000` appears in an attack |
+| `graze`, `hurt`, `down` | Dodging and damage |
+| `phase` | A new boss phase starts |
+| `victory`, `gameover` | The battle ends |
+
+Extra per-section keys:
+
+- `[PHASE_n]` `music = AUDIO/phase2.mp3` changes the track when the phase starts.
+- `[ATTACK:name]` `sound = AUDIO/laser.wav` plays when that attack begins.
+- `[ATTACK:name]` `warn = off` disables the red warning for that attack.
+
+Press **M** to mute or unmute. Browsers only allow sound after the first key press, click or tap. The fight editor keeps these settings but does not preview or zip audio files, so copy `MOD/AUDIO/` yourself.
+
+---
+
 ## 11. Testing and debugging
 
 - **Open the browser console** (F12). Missing or failed assets log `Could not load mod asset: <path>`.
@@ -797,5 +872,5 @@ These live in `GAME/script.js`, not in the INI:
 - **Multi-enemy fights:** every enemy shares the same attack sequence. Phase triggers read the first enemy still in the fight. Single-boss fights work best.
 - **Win condition:** killing and sparing are treated the same.
 - **Spoken text:** one line per `dialogue` key, and no inline formatting or colors.
-- **Battle box size:** taken from each attack's GIF and clamped to 48–580 × 48–245. Its position is fixed (centered horizontally, around y = 190).
+- **Battle box size:** taken from each attack's GIF (advanced attacks use `boxW`/`boxH` or `[ARENA]`) and clamped to 48–580 × 48–245. Its position is fixed (centered horizontally, around y = 190).
 - **Resolution:** the game is fixed at 640×480 and scales to fit the window with letterboxing. All coordinates (`x`, `y`, arena sizes) are in that 640×480 space.
