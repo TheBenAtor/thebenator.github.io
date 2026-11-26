@@ -84,6 +84,80 @@ function registerModFileList(fileList) {
     return iniFile;
 }
 
+// ============================================================================
+// ZIP MOD LOADER  (paste into GAME/script.js, right after registerModFileList)
+// Reads a .zip fully in the browser and hands the files to the same code path
+// that folder loading uses, so lookups stay case-insensitive with filename fallback.
+// ============================================================================
+async function inflateRaw(data) {
+    if (typeof DecompressionStream === 'undefined') {
+        throw new Error('This browser cannot unpack compressed ZIPs. Update it, or re-save the ZIP with "store"/no compression.');
+    }
+    const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// Returns File objects whose webkitRelativePath looks like "MOD/<path inside the mod>".
+async function zipToFiles(buffer) {
+    const u8 = new Uint8Array(buffer);
+    const dv = new DataView(buffer);
+
+    // 1. Find the End Of Central Directory record
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 22 - 65535); i--) {
+        if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error('Not a valid ZIP file.');
+
+    // 2. Read the central directory
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const decoder = new TextDecoder();
+    const entries = [];
+    for (let n = 0; n < count; n++) {
+        if (dv.getUint32(p, true) !== 0x02014b50) break;
+        const method = dv.getUint16(p + 10, true);
+        const csize  = dv.getUint32(p + 20, true);
+        const nameLen = dv.getUint16(p + 28, true);
+        const extraLen = dv.getUint16(p + 30, true);
+        const commentLen = dv.getUint16(p + 32, true);
+        const localOffset = dv.getUint32(p + 42, true);
+        const name = decoder.decode(u8.subarray(p + 46, p + 46 + nameLen)).replace(/\\/g, '/');
+        p += 46 + nameLen + extraLen + commentLen;
+
+        const lower = name.toLowerCase();
+        if (name.endsWith('/') || lower.startsWith('__macosx/') || lower.endsWith('.ds_store') || lower.endsWith('thumbs.db')) continue;
+        if (csize === 0xFFFFFFFF) throw new Error('ZIP64 archives are not supported.');
+        entries.push({ name, method, csize, localOffset });
+    }
+
+    // 3. Work out where the mod root is (the folder that holds encounter.ini)
+    const iniEntry = entries
+        .filter(e => /(^|\/)encounter\.(ini|txt)$/i.test(e.name))
+        .sort((a, b) => a.name.length - b.name.length)[0];
+    const root = iniEntry ? iniEntry.name.slice(0, iniEntry.name.lastIndexOf('/') + 1) : '';
+
+    // 4. Extract everything
+    const files = [];
+    for (const e of entries) {
+        const lh = e.localOffset;
+        const start = lh + 30 + dv.getUint16(lh + 26, true) + dv.getUint16(lh + 28, true);
+        const raw = u8.subarray(start, start + e.csize);
+        let data;
+        if (e.method === 0) data = raw.slice();
+        else if (e.method === 8) data = await inflateRaw(raw);
+        else throw new Error(`Unsupported ZIP compression (method ${e.method}) in ${e.name}.`);
+
+        const rel = e.name.startsWith(root) ? e.name.slice(root.length) : e.name;
+        const file = new File([data], rel.split('/').pop());
+        // registerModFileList() strips the first path segment (the folder name), so give it one.
+        Object.defineProperty(file, 'webkitRelativePath', { value: 'MOD/' + rel });
+        files.push(file);
+    }
+    if (files.length === 0) throw new Error('The ZIP is empty.');
+    return files;
+}
+
 function findModFile(path) {
     const norm = normalizeModPath(path);
     return modFiles.get(norm) || modFiles.get(norm.split('/').pop()) || null;
@@ -3044,7 +3118,7 @@ const README_URL = 'https://github.com/TheBenAtor/thebenator.github.io';
 const EDITOR_URL = 'editor/';
 
 // Top-right toolbar: README + EDITOR + LOAD MOD. Only created when no encounter was auto-loaded.
-function createToolbarButtons(applyFiles) {
+function createToolbarButtons(applyFiles, applyZip) {
     const input = document.createElement('input');
     input.type = 'file';
     input.webkitdirectory = true;
@@ -3052,6 +3126,13 @@ function createToolbarButtons(applyFiles) {
     input.style.display = 'none';
     document.body.appendChild(input);
     input.onchange = e => { if (e.target.files.length) applyFiles(e.target.files); };
+
+    const zipInput = document.createElement('input');
+    zipInput.type = 'file';
+    zipInput.accept = '.zip,application/zip';
+    zipInput.style.display = 'none';
+    document.body.appendChild(zipInput);
+    zipInput.onchange = e => { if (e.target.files[0]) applyZip(e.target.files[0]); e.target.value = ''; };
 
     const bar = document.createElement('div');
     Object.assign(bar.style, {
@@ -3075,6 +3156,7 @@ function createToolbarButtons(applyFiles) {
 
     makeBtn('README', () => window.open(README_URL, '_blank', 'noopener'));
     makeBtn('EDITOR', () => window.open(EDITOR_URL, '_blank', 'noopener'));
+    makeBtn('LOAD ZIP', () => zipInput.click());
     makeBtn('LOAD MOD', () => input.click());
     document.body.appendChild(bar);
 }
@@ -3091,7 +3173,11 @@ function setupModLoaderUI(showButtons = true) {
         initBattle();
     };
 
-    if (showButtons) createToolbarButtons(applyFiles);
+    const applyZip = async (file) => {
+        try { await applyFiles(await zipToFiles(await file.arrayBuffer())); }
+        catch (err) { alert('Could not read ZIP: ' + err.message); }
+    };
+    if (showButtons) createToolbarButtons(applyFiles, applyZip);
 
     // Drag-and-drop a mod folder or files onto the game window
     window.addEventListener('dragover', e => e.preventDefault());
@@ -3131,7 +3217,9 @@ function setupModLoaderUI(showButtons = true) {
         };
 
         for (const entry of entries) await walkEntry(entry);
-        if (collected.length > 0) applyFiles(collected);
+        const zip = collected.find(f => /\.zip$/i.test(f.name));
+        if (zip && !collected.some(f => /^encounter\.(ini|txt)$/i.test(f.name))) applyZip(zip);
+        else if (collected.length > 0) applyFiles(collected);
     });
 }
 
@@ -3148,6 +3236,14 @@ async function tryAutoLoadDefaultIni() {
             // Running via file:// without a server; fall back to built-in battle
         }
     }
+    // No MOD/encounter.ini: try a MOD.zip shipped next to index.html
+    try {
+        const res = await fetch('MOD.zip');
+        if (res.ok) {
+            const ini = registerModFileList(await zipToFiles(await res.arrayBuffer()));
+            if (ini) { loadedModConfig = parseEncounterIni(await ini.text()); return true; }
+        }
+    } catch (_) { /* no MOD.zip, fall through to the built-in battle */ }
     return false;
 }
 
