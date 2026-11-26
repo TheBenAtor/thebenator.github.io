@@ -51,6 +51,16 @@ textarea{resize:vertical;min-height:54px}
 .acard .nm{word-break:break-all;color:var(--txt)}
 .tag{display:inline-block;padding:0 6px;border-radius:99px;font-size:11px;border:1px solid var(--line);color:var(--dim)}
 .tag.un{border-color:var(--warn);color:var(--warn)}.tag.im{border-color:var(--info);color:var(--info)}
+#advModal{position:fixed;inset:0;z-index:60;background:#000d;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:12px}
+#advModal.on{display:flex}
+#advTop{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;max-width:100%}
+#advWrap{position:relative;overflow:hidden;border:1px solid var(--line);background:#000;flex:none}
+#advStage{position:absolute;left:0;top:0;width:640px;height:480px;transform-origin:0 0;background:#15151d;overflow:hidden}
+#advStage>*{position:absolute}
+#advStage img.atk{left:0;top:0;width:640px;height:480px;image-rendering:pixelated}
+#advStage .gl{font:11px monospace;color:#fff6;padding:2px 6px;pointer-events:none}
+#advStage.noguides .gl,#advStage.noguides .gz{display:none}
+#advNote{margin:0;text-align:center;max-width:680px}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--acc);padding:8px 14px;border-radius:8px;z-index:20;display:none;max-width:90vw}
 .chk{display:flex;align-items:center;gap:6px;align-self:end;padding:6px 0}
 .row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
@@ -105,6 +115,7 @@ code{background:var(--bg);padding:1px 5px;border-radius:4px}
   </aside>
 </div>
 
+<div id="advModal"><div id="advTop"></div><div id="advWrap"><div id="advStage"></div></div><div id="advNote" class="hint"></div></div>
 <div id="toast"></div>
 <script>
 'use strict';
@@ -448,7 +459,7 @@ function tAttacks(){
 <div class="card"><h4>Files in ATTACKS/ <span class="spacer"></span><button class="btn sm" data-act="importPick" data-folder="ATTACKS">Import attack files…</button></h4>
 ${files.length?`<div class="hint">Click a file to add it as a new turn in the global sequence.</div><div class="chips">${files.map(f=>{const n=f.replace(/^attacks\//i,'');return `<span class="chip" data-act="useAttack" data-name="${esc(n)}">${esc(n)}</span>`}).join('')}</div>`:'<div class="hint">No attack files yet. Import GIFs or _stripN.png files, or drop them on the Assets tab.</div>'}</div>
 <div style="margin-bottom:12px"><button class="btn" data-act="push" data-path="metas" data-new="meta">+ Add attack settings</button> ${missing.map(n=>`<button class="btn sm" data-act="addMeta" data-name="${esc(n)}">+ ${esc(n)}</button>`).join(' ')}</div>
-${S.metas.map((m,i)=>`<div class="card"><h4>${esc(m.name||'(unnamed)')} <span class="spacer"></span><button class="btn sm del" data-act="remove" data-path="metas" data-i="${i}">✕</button></h4><div class="grid">
+${S.metas.map((m,i)=>`<div class="card"><h4>${esc(m.name||'(unnamed)')} ${isAdvanced(m)?'<span class="tag im">advanced</span>':''}<span class="spacer"></span>${isAdvanced(m)?`<button class="btn sm" data-act="previewAdv" data-i="${i}">▶ Preview</button>`:''}<button class="btn sm del" data-act="remove" data-path="metas" data-i="${i}">✕</button></h4><div class="grid">
 ${fld('name (as used in lists)',`metas.${i}.name`,{cls:'w2'})}${fld('file',`metas.${i}.file`,{cls:'w2',ph:'ATTACKS/'+(m.name||'x')+'.gif'})}
 ${fld('damage',`metas.${i}.damage`,{type:'number',ph:'18'})}${fld('duration (frames @60)',`metas.${i}.duration`,{type:'number',ph:'480'})}${fld('fps',`metas.${i}.fps`,{type:'number'})}${fld('boss_anim',`metas.${i}.boss_anim`)}
 ${fld('boxW (override)',`metas.${i}.boxW`,{type:'number'})}${fld('boxH (override)',`metas.${i}.boxH`,{type:'number'})}
@@ -504,7 +515,7 @@ main.addEventListener('input',e=>{
 });
 main.addEventListener('change',e=>{
   const p=e.target.dataset&&e.target.dataset.p; if(!p)return;
-  if(/\.(name|num|ownAttacks)$/.test(p)||/ownAttacks/.test(p)||(tab==='audio'&&e.target.tagName==='SELECT')){renderMain()}
+  if(/\.(name|num|ownAttacks|mode)$/.test(p)||/ownAttacks/.test(p)||(tab==='audio'&&e.target.tagName==='SELECT')){renderMain()}
 });
 main.addEventListener('click',e=>{
   const b=e.target.closest('[data-act]');if(!b)return;
@@ -520,6 +531,7 @@ main.addEventListener('click',e=>{
   else if(act==='importSprite'){pendingFolder='ENEMY';pendingSprite=true;$('fImg').click();return}
   else if(act==='removeAsset'){removeImported(b.dataset.path)}
   else if(act==='playSound'){previewSound(get(path));return}
+  else if(act==='previewAdv'){openAdvPreview(i);return}
   else if(act==='uploadSound'){pendingSound=path;$('fAudio').click();return}
   else if(act==='useAttack'){
     const t=S.attacks.turns,last=t.reduce((m,x,i)=>has(x)?i:m,-1);
@@ -891,6 +903,56 @@ main.addEventListener('dragover',e=>{const z=e.target.closest&&e.target.closest(
 main.addEventListener('dragleave',e=>{const z=e.target.closest&&e.target.closest('.drop');if(z)z.classList.remove('over')});
 main.addEventListener('drop',async e=>{const z=e.target.closest&&e.target.closest('.drop');if(!z)return;e.preventDefault();e.stopPropagation();z.classList.remove('over');await importAssets([...e.dataTransfer.files],z.dataset.folder);renderMain();update()});
 try{idb.get('imports').then(a=>{if(Array.isArray(a)&&a.length){importedEntries=a.filter(x=>x&&x.file&&x.path);rebuildAssets();renderMain();update()}}).catch(()=>{})}catch(_){}
+
+
+/* ============================ ADVANCED ATTACK PREVIEW ============================ */
+const isAdvanced=m=>String((m&&m.mode)||'').trim().toLowerCase()==='advanced';
+function advBox(m){ // same sizing rules as the engine: boxW/boxH override, else [ARENA], clamped
+  const dw=+S.arena.w||180,dh=+S.arena.h||150;
+  const w=Math.max(48,Math.min(580,has(m.boxW)&&!Number.isNaN(+m.boxW)?+m.boxW:dw));
+  const h=Math.max(48,Math.min(245,has(m.boxH)&&!Number.isNaN(+m.boxH)?+m.boxH:dh));
+  return{w,h};
+}
+let advIdx=-1;
+function fitAdv(){
+  const w=$('advWrap'),st=$('advStage'); if(!w||!$('advModal').classList.contains('on'))return;
+  const sc=Math.max(.2,Math.min((innerWidth-24)/640,(innerHeight-170)/480,2));
+  st.style.transform=`scale(${sc})`;w.style.width=640*sc+'px';w.style.height=480*sc+'px';
+}
+function openAdvPreview(i){
+  const m=S.metas[i]; if(!m)return; advIdx=i;
+  const file=m.file||m.name, a=resolveAsset(file,'attack'), {w,h}=advBox(m);
+  const screenSoul=String(m.soul||'').trim().toLowerCase()==='screen';
+  const bx=Math.round(320-w/2),by=Math.round(190-h/2);
+  $('advTop').innerHTML=`<b>${esc(m.name)}</b><span class="hint" style="margin:0">box ${w}×${h} · soul: ${screenSoul?'screen (no box)':'box'}</span>
+   <button class="btn sm" id="advRestart">↻ Restart</button>
+   <label class="hint" style="margin:0;display:flex;gap:4px;align-items:center"><input type="checkbox" id="advGuides" checked> guides</label>
+   <button class="btn sm pri" id="advClose">Close</button>`;
+  $('advStage').className='';
+  $('advStage').innerHTML=`
+   <div class="gz" style="left:0;top:280px;width:640px;height:80px;background:#000"></div>
+   <div class="gl" style="left:0;top:282px">party panel</div>
+   <div class="gz" style="left:0;top:370px;width:640px;height:110px;background:#000"></div>
+   <div class="gl" style="left:0;top:372px">dialogue area</div>
+   ${screenSoul?'':`<div style="left:${bx-2}px;top:${by-2}px;width:${w+4}px;height:${h+4}px;box-sizing:border-box;border:4px solid #0f0;background:#000"></div>`}
+   ${a?`<img class="atk" src="${a.url}" alt="">`:''}
+   <svg style="left:313px;top:183px" width="14" height="14" viewBox="0 0 14 14"><path d="M7 13C-4 5 2-1 7 3.5 12-1 18 5 7 13Z" fill="#f00"/></svg>`;
+  const notes=[];
+  if(!a)notes.push(`"${file}" was not found in the mod folder. Load or open the mod, or import the GIF in Assets, to see the attack. The box size is still shown.`);
+  else if(!/\.gif$/i.test(a.path))notes.push('Advanced attacks must be .gif files; the game will show an error and play the built-in bullets.');
+  notes.push(screenSoul?'Soul is free across the whole screen (no battle box).':'Box is centered horizontally, vertically around y = 190. The GIF is drawn over the whole screen, on top of it.');
+  $('advNote').textContent=notes.join(' ');
+  const img=$('advStage').querySelector('img.atk');
+  if(img)img.onload=()=>{if(img.naturalWidth!==640||img.naturalHeight!==480)$('advNote').textContent=`This GIF is ${img.naturalWidth}×${img.naturalHeight}. Advanced mode needs exactly 640×480, or the game shows an error and plays the built-in bullets. `+$('advNote').textContent};
+  $('advModal').classList.add('on');fitAdv();
+  $('advClose').onclick=closeAdv;
+  $('advRestart').onclick=()=>{const im=$('advStage').querySelector('img.atk');if(im){const n=im.cloneNode();n.onload=im.onload;im.replaceWith(n)}};
+  $('advGuides').onchange=e=>$('advStage').classList.toggle('noguides',!e.target.checked);
+}
+function closeAdv(){$('advModal').classList.remove('on');$('advStage').innerHTML='';advIdx=-1}
+$('advModal').addEventListener('click',e=>{if(e.target.id==='advModal')closeAdv()});
+window.addEventListener('keydown',e=>{if(e.key==='Escape'&&advIdx>=0)closeAdv()});
+window.addEventListener('resize',fitAdv);
 
 full();
 requestAnimationFrame(loop);
